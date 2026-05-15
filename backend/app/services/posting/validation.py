@@ -83,6 +83,5 @@ def ensure_sufficient_balance(account: Account, credit_amount: Decimal, *, permi
 
 
 def ensure_posted_transaction_is_immutable(transaction: Transaction) -> None:
-    if transaction.status == "posted":
+    if transaction.status in {"posted", "reversed"}:
         raise HTTPException(status_code=400, detail="Posted transactions are immutable; use reversal")
-

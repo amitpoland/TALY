@@ -349,3 +349,139 @@ def test_validation_failures_and_immutable_protection(client: TestClient, db_ses
     )
     with pytest.raises(HTTPException):
         ensure_posted_transaction_is_immutable(tx)
+
+    tx.status = "reversed"
+    with pytest.raises(HTTPException):
+        ensure_posted_transaction_is_immutable(tx)
+
+
+def test_commission_included_cannot_exceed_gross(client: TestClient, db_session: Session) -> None:
+    user = create_user(db_session)
+    cash = create_account(db_session, "CASH-USD", "cash")
+    clearing = create_account(db_session, "CLEARING-USD", "clearing")
+    commission = create_account(db_session, "COMM-USD", "commission_income")
+
+    response = client.post(
+        "/transactions/receipt/preview",
+        json={
+            "transaction_date": "2026-05-15",
+            "created_by_user_id": user.id,
+            "receiving_account_id": cash.id,
+            "clearing_account_id": clearing.id,
+            "gross_amount": "100.00",
+            "principal_amount": "1.00",
+            "commission_amount": "101.00",
+            "commission_income_account_id": commission.id,
+            "currency": "USD",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_zero_and_negative_amounts_are_blocked(client: TestClient, db_session: Session) -> None:
+    user = create_user(db_session)
+    cash = create_account(db_session, "CASH-USD", "cash")
+    clearing = create_account(db_session, "CLEARING-USD", "clearing")
+
+    zero_response = client.post(
+        "/transactions/payment/preview",
+        json={
+            "transaction_date": "2026-05-15",
+            "created_by_user_id": user.id,
+            "paying_account_id": cash.id,
+            "clearing_account_id": clearing.id,
+            "amount": "0.00",
+            "currency": "USD",
+        },
+    )
+    negative_response = client.post(
+        "/transactions/expense/preview",
+        json={
+            "transaction_date": "2026-05-15",
+            "created_by_user_id": user.id,
+            "payment_account_id": cash.id,
+            "expense_account_id": clearing.id,
+            "amount": "-1.00",
+            "currency": "USD",
+        },
+    )
+
+    assert zero_response.status_code == 400
+    assert negative_response.status_code == 400
+
+
+def test_same_account_transfer_blocked(client: TestClient, db_session: Session) -> None:
+    user = create_user(db_session)
+    cash = create_account(db_session, "CASH-USD", "cash")
+
+    response = client.post(
+        "/transactions/cash-handover/preview",
+        json={
+            "transaction_date": "2026-05-15",
+            "created_by_user_id": user.id,
+            "from_account_id": cash.id,
+            "to_account_id": cash.id,
+            "amount": "1.00",
+            "currency": "USD",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_reversal_cannot_be_reversed_twice(client: TestClient, db_session: Session) -> None:
+    user = create_user(db_session)
+    cash = create_account(db_session, "CASH-USD", "cash")
+    equity = create_account(db_session, "EQUITY-USD", "owner_equity")
+    original = post(client, "/transactions/opening-balance/post", opening_payload(user, cash, equity, "50.00"))
+
+    post(
+        client,
+        f"/transactions/{original['transaction_id']}/reverse/post",
+        {
+            "created_by_user_id": user.id,
+            "transaction_date": "2026-05-15",
+            "reversal_reason": "Wrong opening amount",
+        },
+    )
+    second = client.post(
+        f"/transactions/{original['transaction_id']}/reverse/preview",
+        json={
+            "created_by_user_id": user.id,
+            "transaction_date": "2026-05-15",
+            "reversal_reason": "Try again",
+        },
+    )
+
+    assert second.status_code == 400
+
+
+def test_expense_affects_profitability_but_not_settlement_by_default(
+    client: TestClient, db_session: Session
+) -> None:
+    user = create_user(db_session)
+    settlement = create_settlement(db_session)
+    bank = create_account(db_session, "BANK-USD", "bank")
+    expense = create_account(db_session, "EXPENSE-USD", "expense")
+    equity = create_account(db_session, "EQUITY-USD", "owner_equity")
+    post(client, "/transactions/opening-balance/post", opening_payload(user, bank, equity, "100.00"))
+
+    result = post(
+        client,
+        "/transactions/expense/post",
+        {
+            "transaction_date": "2026-05-15",
+            "created_by_user_id": user.id,
+            "settlement_id": settlement.id,
+            "payment_account_id": bank.id,
+            "expense_account_id": expense.id,
+            "amount": "5.00",
+            "currency": "USD",
+        },
+    )
+
+    balance = client.get(f"/settlements/{settlement.id}/balance")
+    assert Decimal(result["profitability_effect"]["USD"]) == Decimal("-5.00")
+    assert balance.json()["balances"] == {}
+    assert balance.json()["is_balanced_by_currency"] is True
