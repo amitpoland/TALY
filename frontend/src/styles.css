@@ -192,6 +192,48 @@ a {
   font-size: 13px;
 }
 
+.voucher-form {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  align-items: start;
+}
+
+.voucher-form .calculation-card {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #cfe1df;
+  background: #f6fbfa;
+  border-radius: 8px;
+  padding: 12px;
+  color: #174d47;
+}
+
+.voucher-form .calculation-card strong,
+.voucher-form .calculation-card span {
+  display: block;
+}
+
+.checkbox-line {
+  align-content: center;
+  grid-template-columns: auto 1fr;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.checkbox-line input {
+  min-height: auto;
+}
+
+.advanced-details {
+  grid-column: 1 / -1;
+  margin-bottom: 0;
+}
+
+.advanced-details .compact {
+  margin: 12px 0 0;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
 .tabs {
   display: flex;
   flex-wrap: wrap;

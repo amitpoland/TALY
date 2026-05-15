@@ -38,6 +38,7 @@ const indexSource = readFileSync(new URL("../index.html", import.meta.url), "utf
 const mainSource = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const dashboardSource = readFileSync(new URL("../src/pages/DashboardPage.tsx", import.meta.url), "utf8");
+const transactionSource = readFileSync(new URL("../src/pages/TransactionEntryPage.tsx", import.meta.url), "utf8");
 const viteSource = readFileSync(new URL("../vite.config.ts", import.meta.url), "utf8");
 const envExampleSource = readFileSync(new URL("../.env.example", import.meta.url), "utf8");
 const envDevelopmentSource = readFileSync(new URL("../.env.development", import.meta.url), "utf8");
@@ -53,6 +54,19 @@ if (!appSource.includes("app-shell") || !appSource.includes("sidebar") || !appSo
 }
 if (!dashboardSource.includes("<h1>Dashboard</h1>")) {
   throw new Error("Missing dashboard header");
+}
+for (const forbidden of ["User ID", "Receiving Account ID", "Clearing Account ID"]) {
+  if (transactionSource.includes(forbidden)) {
+    throw new Error(`Transaction UI exposes internal label: ${forbidden}`);
+  }
+}
+for (const required of ["Party", "Receive In", "Settlement", "Currency", "Amount Mode", "Amount", "Commission Type", "Commission Value"]) {
+  if (!transactionSource.includes(required)) {
+    throw new Error(`Receipt voucher missing ${required}`);
+  }
+}
+if (!transactionSource.includes("api.previewTransaction(routeKey, payload)") || !transactionSource.includes("api.postTransaction(routeKey, lastPayload)")) {
+  throw new Error("Voucher flow must call backend preview before post");
 }
 if (!envExampleSource.includes("VITE_API_BASE_URL=http://127.0.0.1:8000")) {
   throw new Error("Missing clear backend API base URL setting");
