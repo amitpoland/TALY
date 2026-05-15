@@ -79,11 +79,15 @@ def add_manual_component(
     currency: str,
     account: Account,
     status: str = "posted",
+    settlement_id: int | None = None,
     affects_profitability: bool = True,
     profitability_effect_type: str = "expense",
+    affects_settlement: bool = False,
+    settlement_effect_type: str | None = None,
 ) -> Transaction:
     transaction = Transaction(
         transaction_no=transaction_no,
+        settlement_id=settlement_id,
         transaction_type="adjustment",
         transaction_date=transaction_date,
         status=status,
@@ -97,12 +101,15 @@ def add_manual_component(
     db.add(
         TransactionComponent(
             transaction_id=transaction.id,
+            settlement_id=settlement_id,
             sequence_no=1,
             component_type=component_type,
             account_id=account.id,
             amount=Decimal(amount),
             currency=currency,
             direction="out",
+            affects_settlement=affects_settlement,
+            settlement_effect_type=settlement_effect_type,
             affects_profitability=affects_profitability,
             profitability_effect_type=profitability_effect_type,
         )
@@ -353,3 +360,173 @@ def test_currency_filters_work(client: TestClient, db_session: Session) -> None:
     assert response.status_code == 200
     assert response.json()["rows"] == []
     assert response.json()["totals"] == {}
+
+
+def test_commission_earned_and_paid_in_same_settlement(client: TestClient, db_session: Session) -> None:
+    data = seed_report_data(client, db_session)
+    agent_account = db_session.query(Account).filter(Account.account_code == "RPT-AGENT-WALLET").one()
+    add_manual_component(
+        db_session,
+        user=data["user"],
+        transaction_no="RPT-SET-COMM-PAID",
+        transaction_date="2026-05-18",
+        component_type="commission_paid",
+        amount="1.50",
+        currency="USD",
+        account=agent_account,
+        settlement_id=data["settlement"].id,
+    )
+
+    earned = client.get(f"/reports/commission-earned?settlement_id={data['settlement'].id}")
+    paid = client.get(f"/reports/commission-paid?settlement_id={data['settlement'].id}")
+
+    assert earned.status_code == 200
+    assert paid.status_code == 200
+    assert total(earned.json(), "USD") == Decimal("5.000000")
+    assert total(paid.json(), "USD") == Decimal("-1.500000")
+
+
+def test_expense_linked_to_settlement_and_general_expense_without_settlement(client: TestClient, db_session: Session) -> None:
+    data = seed_report_data(client, db_session)
+    cash = data["cash"]
+    expense = db_session.query(Account).filter(Account.account_code == "RPT-EXPENSE").one()
+    post(
+        client,
+        "/transactions/expense/post",
+        {
+            "transaction_date": "2026-05-19",
+            "created_by_user_id": data["user"].id,
+            "settlement_id": data["pending"].id,
+            "payment_account_id": cash.id,
+            "expense_account_id": expense.id,
+            "amount": "4.00",
+            "currency": "USD",
+            "expense_type": "settlement_charge",
+        },
+    )
+
+    linked = client.get(f"/reports/expenses?settlement_id={data['pending'].id}")
+    general = client.get("/reports/expenses")
+
+    assert linked.status_code == 200
+    assert general.status_code == 200
+    assert total(linked.json(), "USD") == Decimal("-4.000000")
+    assert total(general.json(), "USD") == Decimal("-14.000000")
+    assert any(row["settlement_id"] is None for row in general.json()["rows"])
+
+
+def test_fx_gain_and_loss_in_same_month(client: TestClient, db_session: Session) -> None:
+    data = seed_report_data(client, db_session)
+    fx_account = db_session.query(Account).filter(Account.account_code == "RPT-FX-GL").one()
+    add_manual_component(
+        db_session,
+        user=data["user"],
+        transaction_no="RPT-FX-LOSS",
+        transaction_date="2026-05-20",
+        component_type="fx_loss",
+        amount="6.00",
+        currency="AED",
+        account=fx_account,
+        profitability_effect_type="expense",
+    )
+
+    response = client.get("/reports/fx-profit-loss")
+
+    assert response.status_code == 200
+    assert total(response.json(), "AED") == Decimal("4.000000")
+
+
+def test_monthly_profitability_with_commission_expense_and_fx(client: TestClient, db_session: Session) -> None:
+    data = seed_report_data(client, db_session)
+    fx_account = db_session.query(Account).filter(Account.account_code == "RPT-FX-GL").one()
+    add_manual_component(
+        db_session,
+        user=data["user"],
+        transaction_no="RPT-FX-LOSS-MONTHLY",
+        transaction_date="2026-05-20",
+        component_type="fx_loss",
+        amount="6.00",
+        currency="AED",
+        account=fx_account,
+        profitability_effect_type="expense",
+    )
+
+    response = client.get("/reports/monthly-profitability")
+
+    assert response.status_code == 200
+    assert total(response.json(), "USD") == Decimal("-7.000000")
+    assert total(response.json(), "AED") == Decimal("4.000000")
+
+
+def test_account_report_after_reversal_nets_to_original_balance(client: TestClient, db_session: Session) -> None:
+    data = seed_report_data(client, db_session)
+
+    response = client.get(f"/reports/cash?account_id={data['cash'].id}")
+
+    assert response.status_code == 200
+    assert total(response.json(), "USD") == Decimal("498.000000")
+    assert response.json()["rows"][0]["balance"] == "498.000000"
+
+
+def test_settlement_chain_with_receipt_payment_expense_and_fx(client: TestClient, db_session: Session) -> None:
+    data = seed_report_data(client, db_session)
+    settlement = data["pending"]
+    cash = data["cash"]
+    clearing = db_session.query(Account).filter(Account.account_code == "RPT-CLEARING").one()
+    expense = db_session.query(Account).filter(Account.account_code == "RPT-EXPENSE").one()
+    fx_gl = db_session.query(Account).filter(Account.account_code == "RPT-FX-GL").one()
+    post(client, "/transactions/receipt/post", {"transaction_date": "2026-05-18", "created_by_user_id": data["user"].id, "settlement_id": settlement.id, "receiving_account_id": cash.id, "clearing_account_id": clearing.id, "gross_amount": "12.00", "principal_amount": "12.00", "currency": "USD"})
+    post(client, "/transactions/payment/post", {"transaction_date": "2026-05-19", "created_by_user_id": data["user"].id, "settlement_id": settlement.id, "paying_account_id": cash.id, "clearing_account_id": clearing.id, "amount": "12.00", "currency": "USD"})
+    post(client, "/transactions/expense/post", {"transaction_date": "2026-05-20", "created_by_user_id": data["user"].id, "settlement_id": settlement.id, "payment_account_id": cash.id, "expense_account_id": expense.id, "amount": "1.00", "currency": "USD", "expense_type": "settlement_charge", "affects_settlement": True})
+    add_manual_component(
+        db_session,
+        user=data["user"],
+        transaction_no="RPT-SET-FX-GAIN",
+        transaction_date="2026-05-20",
+        component_type="fx_gain",
+        amount="2.00",
+        currency="AED",
+        account=fx_gl,
+        settlement_id=settlement.id,
+        profitability_effect_type="income",
+    )
+
+    response = client.get(f"/reports/settlement-chain?settlement_id={settlement.id}")
+
+    assert response.status_code == 200
+    components = {row["component_type"] for row in response.json()["rows"]}
+    assert {"gross_receipt", "principal", "expense", "fx_gain"}.issubset(components)
+    assert total(response.json(), "USD") == Decimal("1.000000")
+
+
+def test_date_boundary_filters_are_inclusive(client: TestClient, db_session: Session) -> None:
+    seed_report_data(client, db_session)
+
+    response = client.get("/reports/commission-earned?date_from=2026-05-10&date_to=2026-05-10")
+
+    assert response.status_code == 200
+    assert total(response.json(), "USD") == Decimal("5.000000")
+
+
+def test_report_endpoints_reject_invalid_date_format(client: TestClient, db_session: Session) -> None:
+    response = client.get("/reports/cash?date_from=15-05-2026")
+
+    assert response.status_code == 422
+
+
+def test_empty_reports_return_stable_schema(client: TestClient, db_session: Session) -> None:
+    response = client.get("/reports/commission-earned?currency=EUR")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "filters": {
+            "date_from": None,
+            "date_to": None,
+            "currency": "EUR",
+            "party_id": None,
+            "account_id": None,
+            "settlement_id": None,
+        },
+        "rows": [],
+        "totals": {},
+    }

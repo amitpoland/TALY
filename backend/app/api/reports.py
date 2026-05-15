@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends
+from datetime import date
+
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -16,6 +18,15 @@ def _filters(
     account_id: int | None = None,
     settlement_id: int | None = None,
 ) -> ReportFilters:
+    for label, value in {"date_from": date_from, "date_to": date_to}.items():
+        if value is None:
+            continue
+        try:
+            date.fromisoformat(value)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"{label} must use YYYY-MM-DD format") from exc
+    if date_from and date_to and date.fromisoformat(date_from) > date.fromisoformat(date_to):
+        raise HTTPException(status_code=422, detail="date_from cannot be after date_to")
     return ReportFilters(
         date_from=date_from,
         date_to=date_to,
