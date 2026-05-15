@@ -14,9 +14,6 @@ function moneyMap(values: Record<string, string>) {
 
 export default function DashboardPage() {
   const { data, loading, error } = useAsync(api.dashboard, []);
-  if (loading) return <LoadingState label="Loading dashboard" />;
-  if (error) return <ErrorState message={error} />;
-  if (!data) return null;
 
   return (
     <section>
@@ -26,16 +23,20 @@ export default function DashboardPage() {
           <p>Cash, bank, settlements, and profitability from posted records.</p>
         </div>
       </header>
-      <div className="metric-grid">
-        <div className="metric"><span>Cash</span><strong>{moneyMap(data.cash_balances)}</strong></div>
-        <div className="metric"><span>Bank</span><strong>{moneyMap(data.bank_balances)}</strong></div>
-        <div className="metric"><span>Pending Settlements</span><strong>{data.pending_settlements}</strong></div>
-        <div className="metric"><span>Closed Settlements</span><strong>{data.closed_settlements}</strong></div>
-        <div className="metric"><span>Commission Earned</span><strong>{moneyMap(data.commission_earned)}</strong></div>
-        <div className="metric"><span>Expenses</span><strong>{moneyMap(data.expenses)}</strong></div>
-        <div className="metric"><span>FX Profit/Loss</span><strong>{moneyMap(data.fx_profit_loss)}</strong></div>
-        <div className="metric"><span>Net Profitability</span><strong>{moneyMap(data.net_profitability)}</strong></div>
-      </div>
+      {loading && <LoadingState label="Loading dashboard" />}
+      {error && <ErrorState message={error} />}
+      {data && (
+        <div className="metric-grid">
+          <div className="metric"><span>Cash</span><strong>{moneyMap(data.cash_balances)}</strong></div>
+          <div className="metric"><span>Bank</span><strong>{moneyMap(data.bank_balances)}</strong></div>
+          <div className="metric"><span>Pending Settlements</span><strong>{data.pending_settlements}</strong></div>
+          <div className="metric"><span>Closed Settlements</span><strong>{data.closed_settlements}</strong></div>
+          <div className="metric"><span>Commission Earned</span><strong>{moneyMap(data.commission_earned)}</strong></div>
+          <div className="metric"><span>Expenses</span><strong>{moneyMap(data.expenses)}</strong></div>
+          <div className="metric"><span>FX Profit/Loss</span><strong>{moneyMap(data.fx_profit_loss)}</strong></div>
+          <div className="metric"><span>Net Profitability</span><strong>{moneyMap(data.net_profitability)}</strong></div>
+        </div>
+      )}
     </section>
   );
 }
