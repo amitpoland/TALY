@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import accounts, audit_logs, health, parties, reports, roles, settlements, transactions, users
+from app.api import accounts, audit_logs, currencies, health, parties, reports, roles, settlements, transactions, users
 
 
 def create_app() -> FastAPI:
@@ -17,6 +17,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(health.router)
+    app.include_router(currencies.router)
     app.include_router(roles.router)
     app.include_router(users.router)
     app.include_router(parties.router)

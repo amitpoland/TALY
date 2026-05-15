@@ -15,6 +15,7 @@ const requiredRoutes = [
   "/transactions/receipt/preview",
   "/transactions/receipt/post",
   "/transactions/fx-conversion/preview",
+  "/currencies",
   "/settlements",
   "/settlements/${id}",
   "/reports/dashboard",
@@ -63,6 +64,11 @@ for (const forbidden of ["User ID", "Receiving Account ID", "Clearing Account ID
 for (const required of ["Party", "Receive In", "Settlement", "Currency", "Amount Mode", "Amount", "Commission Type", "Commission Value"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Receipt voucher missing ${required}`);
+  }
+}
+for (const required of ["No {currency} wallet exists", "Create Wallet", "createPartyWallet", "partyWallet", "api.currencies()"]) {
+  if (!transactionSource.includes(required)) {
+    throw new Error(`Wallet-aware voucher logic missing ${required}`);
   }
 }
 if (!transactionSource.includes("api.previewTransaction(routeKey, payload)") || !transactionSource.includes("api.postTransaction(routeKey, lastPayload)")) {

@@ -109,6 +109,7 @@ export const api = {
   createParty: (payload: ApiRecord) => request<ApiRecord>("/parties", { method: "POST", body: JSON.stringify(payload) }),
   accounts: () => request<ApiRecord[]>("/accounts"),
   createAccount: (payload: ApiRecord) => request<ApiRecord>("/accounts", { method: "POST", body: JSON.stringify(payload) }),
+  currencies: () => request<ApiRecord[]>("/currencies"),
   users: () => request<ApiRecord[]>("/users"),
   auditLogs: () => request<ApiRecord[]>("/audit-logs"),
   settlements: () => request<ApiRecord[]>("/settlements"),

@@ -31,11 +31,19 @@ type Settlement = ApiRecord & {
   base_currency: string;
 };
 
+type Currency = ApiRecord & {
+  code: string;
+  name: string;
+  decimal_places: number;
+  is_active: boolean;
+};
+
 type Lookups = {
   users: ApiRecord[];
   accounts: Account[];
   parties: Party[];
   settlements: Settlement[];
+  currencies: Currency[];
 };
 
 const DEFAULT_BASE_CURRENCY = "USD";
@@ -56,7 +64,8 @@ function asId(value: unknown): number | undefined {
 }
 
 function decimal(value: string): number {
-  const amount = Number(value || "0");
+  const normalized = String(value || "0").trim().replace("%", "").replace(",", ".");
+  const amount = Number(normalized);
   return Number.isFinite(amount) ? amount : 0;
 }
 
@@ -80,6 +89,24 @@ function partyLabel(party: Party): string {
   return `${party.name} (${party.party_type}${party.default_currency ? `, ${party.default_currency}` : ""})`;
 }
 
+function walletTypeForParty(party?: Party): string {
+  if (!party) return "clearing";
+  if (party.party_type === "customer") return "customer_wallet";
+  if (party.party_type === "agent") return "agent_wallet";
+  if (party.party_type === "fx_dealer") return "fx_dealer_wallet";
+  return "clearing";
+}
+
+function partyWallet(accounts: Account[], party?: Party, currency?: string): Account | undefined {
+  if (!party || !currency) return undefined;
+  const type = walletTypeForParty(party);
+  return accounts.find((account) => account.party_id === party.id && account.currency === currency && account.account_type === type);
+}
+
+function walletCode(party: Party, currency: string): string {
+  return `${party.name.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toUpperCase()}-${currency}-WALLET`;
+}
+
 function options(accounts: Account[], types: string[], currency?: string) {
   return accounts.filter((account) => types.includes(account.account_type) && (!currency || account.currency === currency));
 }
@@ -97,8 +124,19 @@ function findParty(parties: Party[], id: string) {
 }
 
 function clearingAccount(accounts: Account[], partyId: string, currency: string): Account | undefined {
-  const partyAccount = accounts.find((account) => account.party_id === Number(partyId) && account.currency === currency && ["customer_wallet", "agent_wallet", "fx_dealer_wallet"].includes(account.account_type));
+  const partyAccount = accounts.find((account) => account.party_id === Number(partyId) && account.currency === currency && ["customer_wallet", "agent_wallet", "fx_dealer_wallet", "clearing"].includes(account.account_type));
   return partyAccount ?? accounts.find((account) => account.account_type === "clearing" && account.currency === currency);
+}
+
+function currencySelect(currencies: Currency[], value: string, onChange: (value: string) => void, label = "Currency") {
+  return (
+    <label>
+      <span>{label}</span>
+      <select required value={value} onChange={(event) => onChange(event.target.value)}>
+        {currencies.map((currency) => <option key={currency.code} value={currency.code}>{currency.code} - {currency.name}</option>)}
+      </select>
+    </label>
+  );
 }
 
 function accountSelect(accounts: Account[], value: string, onChange: (value: string) => void, label: string, types: string[], currency?: string, required = true) {
@@ -192,14 +230,36 @@ function advancedBlock(children: React.ReactNode) {
   return <details className="advanced-details"><summary>Advanced details</summary><div className="entry-form compact">{children}</div></details>;
 }
 
+function MissingWalletNotice({ party, currency, onCreate, busy }: { party?: Party; currency: string; onCreate: () => void; busy: boolean }) {
+  if (!party || !currency) return null;
+  return (
+    <div className="state-block warning wallet-warning">
+      <span>No {currency} wallet exists for {party.name}. Create {party.name} {currency} Wallet.</span>
+      <button type="button" onClick={onCreate} disabled={busy}>{busy ? "Creating..." : "Create Wallet"}</button>
+    </div>
+  );
+}
+
+async function createPartyWallet(party: Party, currency: string) {
+  const accountCode = walletCode(party, currency);
+  return api.createAccount({
+    account_code: accountCode,
+    name: `${party.name} ${currency} Wallet`,
+    account_type: walletTypeForParty(party),
+    currency,
+    party_id: party.id
+  });
+}
+
 type VoucherProps = {
   lookups: Lookups;
   routeKey: TransactionRouteKey;
   submit: (payload: ApiRecord) => void;
+  refreshLookups: () => void;
   busy: boolean;
 };
 
-function ReceiptVoucher({ lookups, submit, busy }: VoucherProps) {
+function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
   const [form, setForm] = useState({
     party: "",
     receiveIn: "",
@@ -213,17 +273,32 @@ function ReceiptVoucher({ lookups, submit, busy }: VoucherProps) {
     exchangeRate: "",
     description: ""
   });
+  const [walletBusy, setWalletBusy] = useState(false);
   const receiveAccount = findAccount(lookups.accounts, form.receiveIn);
+  const selectedParty = findParty(lookups.parties, form.party);
   const commissionValue = decimal(form.commissionValue);
   const amount = decimal(form.amount);
   const commission = form.commissionType === "percentage" ? amount * commissionValue / 100 : form.commissionType === "fixed" ? commissionValue : 0;
   const gross = form.amountMode === "gross" ? amount : amount + commission;
   const principal = form.amountMode === "gross" ? amount - commission : amount;
-  const clearing = clearingAccount(lookups.accounts, form.party, form.currency);
+  const clearing = partyWallet(lookups.accounts, selectedParty, form.currency);
   const commissionAccount = lookups.accounts.find((account) => account.account_type === "commission_income" && account.currency === form.currency);
+  const canPreview = Boolean(clearing && receiveAccount && principal >= 0 && gross > 0);
+
+  async function quickCreateWallet() {
+    if (!selectedParty) return;
+    setWalletBusy(true);
+    try {
+      await createPartyWallet(selectedParty, form.currency);
+      refreshLookups();
+    } finally {
+      setWalletBusy(false);
+    }
+  }
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
+    if (!canPreview) return;
     submit({
       transaction_date: new Date().toISOString().slice(0, 10),
       created_by_user_id: defaultUserId(lookups.users),
@@ -252,7 +327,7 @@ function ReceiptVoucher({ lookups, submit, busy }: VoucherProps) {
         setForm({ ...form, receiveIn, currency: selected?.currency ?? form.currency });
       }, "Receive In", ["cash", "bank"], form.currency)}
       {settlementSelect(lookups.settlements, form.settlement, (settlement) => setForm({ ...form, settlement }))}
-      <label><span>Currency</span><input required value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value.toUpperCase() })} /></label>
+      {currencySelect(lookups.currencies, form.currency, (currency) => setForm({ ...form, currency }))}
       <label><span>Amount Mode</span><select value={form.amountMode} onChange={(event) => setForm({ ...form, amountMode: event.target.value })}><option value="gross">Gross amount entered</option><option value="net">Net amount entered</option></select></label>
       <label><span>Amount</span><input required value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
       <label><span>Commission Type</span><select value={form.commissionType} onChange={(event) => setForm({ ...form, commissionType: event.target.value })}><option value="none">None</option><option value="fixed">Fixed</option><option value="percentage">Percentage</option></select></label>
@@ -263,9 +338,10 @@ function ReceiptVoucher({ lookups, submit, busy }: VoucherProps) {
         <span>Gross {money(gross)} {form.currency}</span>
         <span>Principal {money(principal)} {form.currency}</span>
         <span>Commission {money(commission)} {form.currency}</span>
-        <span>Clearing {clearing ? accountLabel(clearing) : "No matching wallet/clearing account"}</span>
+        <span>Party wallet {clearing ? accountLabel(clearing) : "Missing"}</span>
         {receiveAccount && <span>Receive in {accountLabel(receiveAccount)}</span>}
       </div>
+      {!clearing && <MissingWalletNotice party={selectedParty} currency={form.currency} onCreate={quickCreateWallet} busy={walletBusy} />}
       {advancedBlock(
         <>
           <label><span>Base Currency</span><input value={form.baseCurrency} onChange={(event) => setForm({ ...form, baseCurrency: event.target.value.toUpperCase() })} /></label>
@@ -273,16 +349,29 @@ function ReceiptVoucher({ lookups, submit, busy }: VoucherProps) {
           {form.currency !== form.baseCurrency && <div className="calculation-card"><span>Base amount preview {money(gross * decimal(form.exchangeRate))} {form.baseCurrency}</span></div>}
         </>
       )}
-      <button type="submit" disabled={busy}>Preview Receipt</button>
+      <button type="submit" disabled={busy || !canPreview}>Preview Receipt</button>
     </form>
   );
 }
 
-function PaymentVoucher({ lookups, submit, busy }: VoucherProps) {
+function PaymentVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
   const [form, setForm] = useState({ party: "", payFrom: "", settlement: "", currency: "USD", amount: "", description: "" });
-  const clearing = clearingAccount(lookups.accounts, form.party, form.currency);
+  const selectedParty = findParty(lookups.parties, form.party);
+  const clearing = partyWallet(lookups.accounts, selectedParty, form.currency);
+  const [walletBusy, setWalletBusy] = useState(false);
+  async function quickCreateWallet() {
+    if (!selectedParty) return;
+    setWalletBusy(true);
+    try {
+      await createPartyWallet(selectedParty, form.currency);
+      refreshLookups();
+    } finally {
+      setWalletBusy(false);
+    }
+  }
   function onSubmit(event: FormEvent) {
     event.preventDefault();
+    if (!clearing) return;
     submit({ transaction_date: new Date().toISOString().slice(0, 10), created_by_user_id: defaultUserId(lookups.users), settlement_id: asId(form.settlement), paying_account_id: asId(form.payFrom), clearing_account_id: clearing?.id, amount: form.amount, currency: form.currency, description: form.description || undefined });
   }
   return (
@@ -293,11 +382,12 @@ function PaymentVoucher({ lookups, submit, busy }: VoucherProps) {
         setForm({ ...form, payFrom, currency: selected?.currency ?? form.currency });
       }, "Pay From", ["cash", "bank", "customer_wallet", "agent_wallet", "fx_dealer_wallet"], form.currency)}
       {settlementSelect(lookups.settlements, form.settlement, (settlement) => setForm({ ...form, settlement }))}
-      <label><span>Currency</span><input required value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value.toUpperCase() })} /></label>
+      {currencySelect(lookups.currencies, form.currency, (currency) => setForm({ ...form, currency }))}
       <label><span>Amount</span><input required value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
       <label><span>Description/Reference</span><input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
-      <div className="calculation-card"><span>Party clearing {clearing ? accountLabel(clearing) : "No matching wallet/clearing account"}</span></div>
-      <button type="submit" disabled={busy}>Preview Payment</button>
+      <div className="calculation-card"><span>Party wallet {clearing ? accountLabel(clearing) : "Missing"}</span></div>
+      {!clearing && <MissingWalletNotice party={selectedParty} currency={form.currency} onCreate={quickCreateWallet} busy={walletBusy} />}
+      <button type="submit" disabled={busy || !clearing}>Preview Payment</button>
     </form>
   );
 }
@@ -318,7 +408,7 @@ function TransferVoucher({ lookups, routeKey, submit, busy }: VoucherProps) {
       }, isBank ? "Transfer From" : "Hand Over From", accountTypes, form.currency)}
       {accountSelect(lookups.accounts, form.to, (to) => setForm({ ...form, to }), isBank ? "Transfer To" : "Hand Over To", accountTypes, form.currency)}
       {settlementSelect(lookups.settlements, form.settlement, (settlement) => setForm({ ...form, settlement }))}
-      <label><span>Currency</span><input required value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value.toUpperCase() })} /></label>
+      {currencySelect(lookups.currencies, form.currency, (currency) => setForm({ ...form, currency }))}
       <label><span>Amount</span><input required value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
       <label><span>Description/Reference</span><input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
       <button type="submit" disabled={busy}>Preview {isBank ? "Bank Transfer" : "Cash Handover"}</button>
@@ -340,7 +430,7 @@ function ExpenseVoucher({ lookups, submit, busy }: VoucherProps) {
       }, "Paid From", ["cash", "bank", "customer_wallet", "agent_wallet", "fx_dealer_wallet"], form.currency)}
       {accountSelect(lookups.accounts, form.expense, (expense) => setForm({ ...form, expense }), "Expense Ledger", ["expense", "bank_charge_expense"], form.currency)}
       {settlementSelect(lookups.settlements, form.settlement, (settlement) => setForm({ ...form, settlement }))}
-      <label><span>Currency</span><input required value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value.toUpperCase() })} /></label>
+      {currencySelect(lookups.currencies, form.currency, (currency) => setForm({ ...form, currency }))}
       <label><span>Amount</span><input required value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
       <label><span>Expense Type</span><input value={form.expenseType} onChange={(event) => setForm({ ...form, expenseType: event.target.value })} /></label>
       <label className="checkbox-line"><input type="checkbox" checked={form.affectsSettlement} onChange={(event) => setForm({ ...form, affectsSettlement: event.target.checked })} /> <span>Affects settlement</span></label>
@@ -350,26 +440,50 @@ function ExpenseVoucher({ lookups, submit, busy }: VoucherProps) {
   );
 }
 
-function FxVoucher({ lookups, submit, busy }: VoucherProps) {
-  const [form, setForm] = useState({ from: "", to: "", settlement: "", fromCurrency: "USD", toCurrency: "AED", fromAmount: "", toAmount: "", baseCurrency: "AED", costingMethod: "fifo", fxCharge: "0", chargeAccount: "", description: "" });
+function FxVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
+  const [form, setForm] = useState({ party: "", from: "", to: "", settlement: "", fromCurrency: "EUR", toCurrency: "USD", fromAmount: "", toAmount: "", baseCurrency: "USD", costingMethod: "fifo", fxCharge: "0", chargeAccount: "", description: "" });
+  const [walletBusy, setWalletBusy] = useState<"from" | "to" | null>(null);
+  const selectedParty = findParty(lookups.parties, form.party);
+  const fromWallet = partyWallet(lookups.accounts, selectedParty, form.fromCurrency);
+  const toWallet = partyWallet(lookups.accounts, selectedParty, form.toCurrency);
   const actualRate = decimal(form.fromAmount) ? decimal(form.toAmount) / decimal(form.fromAmount) : 0;
+  const canPreview = Boolean(fromWallet && toWallet && firstId(lookups.accounts, ["clearing"], form.fromCurrency) && firstId(lookups.accounts, ["clearing"], form.baseCurrency) && firstId(lookups.accounts, ["fx_gain_loss"], form.baseCurrency));
+  async function quickCreateWallet(currency: string, target: "from" | "to") {
+    if (!selectedParty) return;
+    setWalletBusy(target);
+    try {
+      await createPartyWallet(selectedParty, currency);
+      refreshLookups();
+    } finally {
+      setWalletBusy(null);
+    }
+  }
   function onSubmit(event: FormEvent) {
     event.preventDefault();
-    submit({ transaction_date: new Date().toISOString().slice(0, 10), created_by_user_id: defaultUserId(lookups.users), settlement_id: asId(form.settlement), from_account_id: asId(form.from), to_account_id: asId(form.to), source_clearing_account_id: firstId(lookups.accounts, ["clearing"], form.fromCurrency), target_clearing_account_id: firstId(lookups.accounts, ["clearing"], form.baseCurrency), fx_gain_loss_account_id: firstId(lookups.accounts, ["fx_gain_loss"], form.baseCurrency), fx_charge_account_id: form.fxCharge !== "0" ? asId(form.chargeAccount) : undefined, from_amount: form.fromAmount, to_amount: form.toAmount, from_currency: form.fromCurrency, to_currency: form.toCurrency, base_currency: form.baseCurrency, costing_method: form.costingMethod, fx_charge: form.fxCharge || "0", description: form.description || undefined });
+    if (!canPreview) return;
+    submit({ transaction_date: new Date().toISOString().slice(0, 10), created_by_user_id: defaultUserId(lookups.users), settlement_id: asId(form.settlement), from_account_id: fromWallet?.id, to_account_id: toWallet?.id, source_clearing_account_id: firstId(lookups.accounts, ["clearing"], form.fromCurrency), target_clearing_account_id: firstId(lookups.accounts, ["clearing"], form.baseCurrency), fx_gain_loss_account_id: firstId(lookups.accounts, ["fx_gain_loss"], form.baseCurrency), fx_charge_account_id: form.fxCharge !== "0" ? asId(form.chargeAccount) : undefined, from_amount: form.fromAmount, to_amount: form.toAmount, from_currency: form.fromCurrency, to_currency: form.toCurrency, base_currency: form.baseCurrency, costing_method: form.costingMethod, fx_charge: form.fxCharge || "0", description: form.description || undefined });
   }
   return (
     <form className="entry-form voucher-form" onSubmit={onSubmit}>
-      {accountSelect(lookups.accounts, form.from, (from) => {
-        const selected = findAccount(lookups.accounts, from);
-        setForm({ ...form, from, fromCurrency: selected?.currency ?? form.fromCurrency });
-      }, "From Account", ["cash", "bank", "customer_wallet", "agent_wallet", "fx_dealer_wallet"], form.fromCurrency)}
-      {accountSelect(lookups.accounts, form.to, (to) => {
-        const selected = findAccount(lookups.accounts, to);
-        setForm({ ...form, to, toCurrency: selected?.currency ?? form.toCurrency, baseCurrency: selected?.currency ?? form.baseCurrency });
-      }, "To Account", ["cash", "bank", "customer_wallet", "agent_wallet", "fx_dealer_wallet"], form.toCurrency)}
+      {partySelect(lookups.parties, form.party, (party) => {
+        const selectedPartyValue = findParty(lookups.parties, party);
+        const from = partyWallet(lookups.accounts, selectedPartyValue, form.fromCurrency)?.id;
+        const to = partyWallet(lookups.accounts, selectedPartyValue, form.toCurrency)?.id;
+        setForm({ ...form, party, from: from ? String(from) : "", to: to ? String(to) : "" });
+      }, true)}
+      {currencySelect(lookups.currencies, form.fromCurrency, (fromCurrency) => {
+        const from = partyWallet(lookups.accounts, selectedParty, fromCurrency)?.id;
+        setForm({ ...form, fromCurrency, from: from ? String(from) : "" });
+      }, "From Currency")}
+      {currencySelect(lookups.currencies, form.toCurrency, (toCurrency) => {
+        const to = partyWallet(lookups.accounts, selectedParty, toCurrency)?.id;
+        setForm({ ...form, toCurrency, baseCurrency: toCurrency, to: to ? String(to) : "" });
+      }, "To Currency")}
+      <div className="calculation-card"><strong>From Wallet</strong><span>{fromWallet ? accountLabel(fromWallet) : "Missing"}</span></div>
+      <div className="calculation-card"><strong>To Wallet</strong><span>{toWallet ? accountLabel(toWallet) : "Missing"}</span></div>
+      {!fromWallet && <MissingWalletNotice party={selectedParty} currency={form.fromCurrency} onCreate={() => quickCreateWallet(form.fromCurrency, "from")} busy={walletBusy === "from"} />}
+      {!toWallet && <MissingWalletNotice party={selectedParty} currency={form.toCurrency} onCreate={() => quickCreateWallet(form.toCurrency, "to")} busy={walletBusy === "to"} />}
       {settlementSelect(lookups.settlements, form.settlement, (settlement) => setForm({ ...form, settlement }))}
-      <label><span>From Currency</span><input required value={form.fromCurrency} onChange={(event) => setForm({ ...form, fromCurrency: event.target.value.toUpperCase() })} /></label>
-      <label><span>To Currency</span><input required value={form.toCurrency} onChange={(event) => setForm({ ...form, toCurrency: event.target.value.toUpperCase(), baseCurrency: event.target.value.toUpperCase() })} /></label>
       <label><span>From Amount</span><input required value={form.fromAmount} onChange={(event) => setForm({ ...form, fromAmount: event.target.value })} /></label>
       <label><span>To Amount</span><input required value={form.toAmount} onChange={(event) => setForm({ ...form, toAmount: event.target.value })} /></label>
       <div className="calculation-card"><span>Actual Rate {actualRate ? actualRate.toFixed(6) : "0.000000"}</span><span>Backend preview will show gain/loss.</span></div>
@@ -381,7 +495,7 @@ function FxVoucher({ lookups, submit, busy }: VoucherProps) {
           {accountSelect(lookups.accounts, form.chargeAccount, (chargeAccount) => setForm({ ...form, chargeAccount }), "FX Charge Ledger", ["expense", "bank_charge_expense"], form.baseCurrency, false)}
         </>
       )}
-      <button type="submit" disabled={busy}>Preview FX Conversion</button>
+      <button type="submit" disabled={busy || !canPreview}>Preview FX Conversion</button>
     </form>
   );
 }
@@ -399,7 +513,7 @@ function OpeningBalanceVoucher({ lookups, submit, busy }: VoucherProps) {
         setForm({ ...form, account, currency: selected?.currency ?? form.currency });
       }, "Opening Account", ["cash", "bank", "customer_wallet", "agent_wallet", "fx_dealer_wallet", "commission_income", "commission_payable", "expense", "bank_charge_expense", "fx_gain_loss", "clearing", "suspense"], form.currency)}
       {accountSelect(lookups.accounts, form.equity, (equity) => setForm({ ...form, equity }), "Equity Ledger", ["owner_equity"], form.currency)}
-      <label><span>Currency</span><input required value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value.toUpperCase() })} /></label>
+      {currencySelect(lookups.currencies, form.currency, (currency) => setForm({ ...form, currency }))}
       <label><span>Amount</span><input required value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
       {advancedBlock(
         <>
@@ -428,9 +542,9 @@ export default function TransactionEntryPage({ routeKey }: { routeKey: Transacti
   const [result, setResult] = useState<ApiRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const { data: lookups, loading } = useAsync(async () => {
-    const [users, accounts, parties, settlements] = await Promise.all([api.users(), api.accounts(), api.parties(), api.settlements()]);
-    return { users, accounts: accounts as Account[], parties: parties as Party[], settlements: settlements as Settlement[] };
+  const { data: lookups, loading, reload } = useAsync(async () => {
+    const [users, accounts, parties, settlements, currencies] = await Promise.all([api.users(), api.accounts(), api.parties(), api.settlements(), api.currencies()]);
+    return { users, accounts: accounts as Account[], parties: parties as Party[], settlements: settlements as Settlement[], currencies: currencies as Currency[] };
   }, []);
 
   useEffect(() => {
@@ -479,7 +593,7 @@ export default function TransactionEntryPage({ routeKey }: { routeKey: Transacti
         {Object.entries(transactionRoutes).map(([key, route]) => <NavLink key={key} to={`/transactions/${key}`}>{route.label}</NavLink>)}
       </div>
       {loading && <LoadingState label="Loading voucher lists" />}
-      {lookups && <VoucherForm lookups={lookups} routeKey={routeKey} submit={previewTransaction} busy={busy} />}
+      {lookups && <VoucherForm lookups={lookups} routeKey={routeKey} submit={previewTransaction} refreshLookups={reload} busy={busy} />}
       {error && <ErrorState message={error} />}
       {result && <div className="state-block success">Posted transaction {String(result.transaction_no)}.</div>}
       {preview && <PreviewPanel preview={preview} onPost={postTransaction} posting={busy} />}
