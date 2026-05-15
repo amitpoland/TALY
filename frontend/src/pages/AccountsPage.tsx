@@ -2,7 +2,7 @@ import { FormEvent, useState } from "react";
 
 import { api } from "../api/client";
 import DataTable from "../components/DataTable";
-import { ErrorState, LoadingState } from "../components/StateBlocks";
+import { ErrorList, LoadingState } from "../components/StateBlocks";
 import { useAsync } from "../hooks/useAsync";
 
 const accountTypes = ["cash", "bank", "customer_wallet", "agent_wallet", "fx_dealer_wallet", "commission_income", "commission_payable", "expense", "bank_charge_expense", "fx_gain_loss", "clearing", "suspense", "owner_equity"];
@@ -35,9 +35,8 @@ export default function AccountsPage() {
         <input placeholder="Party ID" value={form.party_id} onChange={(event) => setForm({ ...form, party_id: event.target.value })} />
         <button type="submit">Add Account</button>
       </form>
-      {submitError && <ErrorState message={submitError} />}
+      <ErrorList messages={[submitError, error]} />
       {loading && <LoadingState label="Loading accounts" />}
-      {error && <ErrorState message={error} />}
       {data && <DataTable rows={data} columns={["id", "account_code", "name", "account_type", "currency", "party_id", "current_balance", "is_active"]} />}
     </section>
   );

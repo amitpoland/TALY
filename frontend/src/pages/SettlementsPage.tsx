@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 
 import { api } from "../api/client";
 import DataTable from "../components/DataTable";
-import { ErrorState, LoadingState } from "../components/StateBlocks";
+import { ErrorList, LoadingState } from "../components/StateBlocks";
 import { useAsync } from "../hooks/useAsync";
 
 export default function SettlementsPage() {
@@ -43,9 +43,8 @@ export default function SettlementsPage() {
         <input required placeholder="Base Currency" value={form.base_currency} onChange={(event) => setForm({ ...form, base_currency: event.target.value.toUpperCase() })} />
         <button type="submit">Add Settlement</button>
       </form>
-      {submitError && <ErrorState message={submitError} />}
+      <ErrorList messages={[submitError, error]} />
       {loading && <LoadingState label="Loading settlements" />}
-      {error && <ErrorState message={error} />}
       {data && <DataTable rows={rows} columns={["id", "settlement_no", "title", "primary_party_id", "status", "base_currency", "opened_at", "closed_at", "detail"]} />}
     </section>
   );

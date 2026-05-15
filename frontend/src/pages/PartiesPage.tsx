@@ -2,7 +2,7 @@ import { FormEvent, useState } from "react";
 
 import { api } from "../api/client";
 import DataTable from "../components/DataTable";
-import { ErrorState, LoadingState } from "../components/StateBlocks";
+import { ErrorList, LoadingState } from "../components/StateBlocks";
 import { useAsync } from "../hooks/useAsync";
 
 export default function PartiesPage() {
@@ -35,9 +35,8 @@ export default function PartiesPage() {
         <input placeholder="Currency" value={form.default_currency} onChange={(event) => setForm({ ...form, default_currency: event.target.value.toUpperCase() })} />
         <button type="submit">Add Party</button>
       </form>
-      {submitError && <ErrorState message={submitError} />}
+      <ErrorList messages={[submitError, error]} />
       {loading && <LoadingState label="Loading parties" />}
-      {error && <ErrorState message={error} />}
       {data && <DataTable rows={data} columns={["id", "party_type", "name", "phone", "email", "default_currency", "is_active"]} />}
     </section>
   );

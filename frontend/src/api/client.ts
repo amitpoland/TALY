@@ -32,7 +32,7 @@ export type PreviewResponse = {
   fx_detail?: ApiRecord | null;
 };
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -46,7 +46,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const data = text ? JSON.parse(text) : null;
   if (!response.ok) {
     const detail = data?.detail;
-    const message = Array.isArray(detail) ? detail.map((item) => item.msg ?? JSON.stringify(item)).join(", ") : detail ?? "Request failed";
+    const message = Array.isArray(detail) ? detail.map((item) => item.msg ?? JSON.stringify(item)).join(", ") : detail ?? `${response.status} ${response.statusText} at ${path}`;
     throw new Error(message);
   }
   return data as T;
