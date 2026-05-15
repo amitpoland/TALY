@@ -48,4 +48,4 @@ class PostingPreview:
     profitability_effect: dict[str, Decimal]
     warnings: list[str]
     errors: list[str]
-
+    fx_detail: dict[str, Decimal | str] | None = None

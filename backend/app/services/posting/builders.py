@@ -13,6 +13,7 @@ from app.core.enums import (
 )
 from app.schemas.posting import (
     ExpensePayload,
+    FxConversionPayload,
     OpeningBalancePayload,
     PaymentPayload,
     ReceiptPayload,
@@ -20,6 +21,7 @@ from app.schemas.posting import (
 )
 from app.services.posting.account_balance_service import preview_balance_effects
 from app.services.posting.dtos import ComponentDraft, LedgerEntryDraft, PostingPreview
+from app.services.posting.fx_lot_service import plan_fifo_lot_consumption
 from app.services.posting.validation import (
     MOVEMENT_ACCOUNT_TYPES,
     ensure_account_currency,
@@ -67,6 +69,7 @@ def _preview(
     components: list[ComponentDraft],
     ledger_entries: list[LedgerEntryDraft],
     warnings: list[str] | None = None,
+    fx_detail: dict[str, Decimal | str] | None = None,
 ) -> PostingPreview:
     return PostingPreview(
         transaction_type=transaction_type,
@@ -79,6 +82,7 @@ def _preview(
         profitability_effect=_profitability_effect(components),
         warnings=warnings or [],
         errors=[],
+        fx_detail=fx_detail,
     )
 
 
@@ -300,3 +304,148 @@ def build_expense_preview(db: Session, payload: ExpensePayload) -> PostingPrevie
         LedgerEntryDraft(payment_account.id, Decimal("0"), payload.amount, payload.currency, "Expense payment"),
     ]
     return _preview(db, transaction_type=TransactionType.EXPENSE.value, gross_amount=payload.amount, gross_currency=payload.currency, components=components, ledger_entries=entries, warnings=[warning] if warning else [])
+
+
+def build_fx_conversion_preview(db: Session, payload: FxConversionPayload) -> PostingPreview:
+    ensure_user(db, payload.created_by_user_id)
+    ensure_settlement_open(db, payload.settlement_id)
+    ensure_currency(db, payload.from_currency)
+    ensure_currency(db, payload.to_currency)
+    ensure_currency(db, payload.base_currency)
+    from_account = get_account(db, payload.from_account_id)
+    to_account = get_account(db, payload.to_account_id)
+    source_clearing = get_account(db, payload.source_clearing_account_id)
+    target_clearing = get_account(db, payload.target_clearing_account_id)
+    gain_loss_account = get_account(db, payload.fx_gain_loss_account_id)
+    ensure_account_currency(from_account, payload.from_currency)
+    ensure_account_currency(to_account, payload.to_currency)
+    ensure_account_currency(source_clearing, payload.from_currency)
+    ensure_account_currency(target_clearing, payload.base_currency)
+    ensure_account_currency(gain_loss_account, payload.base_currency)
+    ensure_account_type(from_account, MOVEMENT_ACCOUNT_TYPES, "FX source")
+    ensure_account_type(to_account, MOVEMENT_ACCOUNT_TYPES, "FX target")
+    ensure_account_type(source_clearing, {AccountType.CLEARING.value}, "Source clearing")
+    ensure_account_type(target_clearing, {AccountType.CLEARING.value}, "Target clearing")
+    ensure_account_type(gain_loss_account, {AccountType.FX_GAIN_LOSS.value}, "FX gain/loss")
+    charge_account = None
+    if payload.fx_charge > 0:
+        charge_account = get_account(db, payload.fx_charge_account_id)
+        ensure_account_currency(charge_account, payload.base_currency)
+        ensure_account_type(charge_account, {AccountType.EXPENSE.value, AccountType.BANK_CHARGE_EXPENSE.value}, "FX charge")
+
+    ensure_sufficient_balance(from_account, payload.from_amount, permission_granted=False)
+    if payload.fx_charge > payload.to_amount and to_account.account_type == AccountType.CASH.value:
+        raise HTTPException(status_code=400, detail="Cash negative balance is blocked")
+    lot_plan = plan_fifo_lot_consumption(
+        db,
+        account_id=from_account.id,
+        currency=payload.from_currency,
+        base_currency=payload.base_currency,
+        amount=payload.from_amount,
+        allow_insufficient_lots=payload.allow_insufficient_lots,
+        source_lot_id=payload.source_lot_id,
+    )
+    actual_base_value = payload.to_amount
+    fx_difference = actual_base_value - lot_plan.original_base_value
+    actual_rate = actual_base_value / payload.from_amount
+
+    components = [
+        ComponentDraft(1, ComponentType.CASH_MOVEMENT.value, payload.from_amount, payload.from_currency, Direction.OUT.value, account_id=from_account.id),
+        ComponentDraft(2, ComponentType.CASH_MOVEMENT.value, payload.to_amount, payload.to_currency, Direction.IN.value, account_id=to_account.id),
+    ]
+    entries = [
+        LedgerEntryDraft(source_clearing.id, payload.from_amount, Decimal("0"), payload.from_currency, "FX source clearing"),
+        LedgerEntryDraft(from_account.id, Decimal("0"), payload.from_amount, payload.from_currency, "FX source out"),
+    ]
+
+    if fx_difference >= 0:
+        if fx_difference > 0:
+            components.append(
+                ComponentDraft(
+                    3,
+                    ComponentType.FX_GAIN.value,
+                    fx_difference,
+                    payload.base_currency,
+                    Direction.IN.value,
+                    account_id=gain_loss_account.id,
+                    affects_profitability=True,
+                    profitability_effect_type=ProfitabilityEffectType.INCOME.value,
+                    linked_detail_type="fx_conversion",
+                )
+            )
+        entries.extend(
+            [
+                LedgerEntryDraft(to_account.id, payload.to_amount, Decimal("0"), payload.to_currency, "FX target in"),
+                LedgerEntryDraft(target_clearing.id, Decimal("0"), lot_plan.original_base_value, payload.base_currency, "FX target clearing"),
+            ]
+        )
+        if fx_difference > 0:
+            entries.append(
+                LedgerEntryDraft(gain_loss_account.id, Decimal("0"), fx_difference, payload.base_currency, "FX gain")
+            )
+    else:
+        fx_loss = -fx_difference
+        components.append(
+            ComponentDraft(
+                3,
+                ComponentType.FX_LOSS.value,
+                fx_loss,
+                payload.base_currency,
+                Direction.OUT.value,
+                account_id=gain_loss_account.id,
+                affects_profitability=True,
+                profitability_effect_type=ProfitabilityEffectType.EXPENSE.value,
+                linked_detail_type="fx_conversion",
+            )
+        )
+        entries.extend(
+            [
+                LedgerEntryDraft(to_account.id, payload.to_amount, Decimal("0"), payload.to_currency, "FX target in"),
+                LedgerEntryDraft(gain_loss_account.id, fx_loss, Decimal("0"), payload.base_currency, "FX loss"),
+                LedgerEntryDraft(target_clearing.id, Decimal("0"), lot_plan.original_base_value, payload.base_currency, "FX target clearing"),
+            ]
+        )
+
+    if payload.fx_charge > 0:
+        sequence_no = 4 if len(components) > 2 else 3
+        components.append(
+            ComponentDraft(
+                sequence_no,
+                ComponentType.FX_CHARGE.value,
+                payload.fx_charge,
+                payload.base_currency,
+                Direction.OUT.value,
+                account_id=charge_account.id,
+                affects_profitability=True,
+                profitability_effect_type=ProfitabilityEffectType.EXPENSE.value,
+                linked_detail_type="expense",
+                notes="fx_charge",
+            )
+        )
+        entries.extend(
+            [
+                LedgerEntryDraft(charge_account.id, payload.fx_charge, Decimal("0"), payload.base_currency, "FX charge"),
+                LedgerEntryDraft(to_account.id, Decimal("0"), payload.fx_charge, payload.base_currency, "FX charge paid"),
+            ]
+        )
+
+    fx_detail = {
+        "costing_method": payload.costing_method,
+        "from_amount": payload.from_amount,
+        "to_amount": payload.to_amount,
+        "original_base_value": lot_plan.original_base_value,
+        "actual_base_value": actual_base_value,
+        "weighted_avg_rate": lot_plan.weighted_avg_rate,
+        "actual_rate": actual_rate,
+        "fx_difference": fx_difference,
+        "fx_charge": payload.fx_charge,
+    }
+    return _preview(
+        db,
+        transaction_type=TransactionType.CURRENCY_EXCHANGE.value,
+        gross_amount=payload.from_amount,
+        gross_currency=payload.from_currency,
+        components=components,
+        ledger_entries=entries,
+        fx_detail=fx_detail,
+    )

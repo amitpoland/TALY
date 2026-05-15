@@ -12,12 +12,15 @@ from app.core.enums import (
 from app.models.account import Account
 from app.models.commission import Commission
 from app.models.expense import Expense
+from app.models.exchange_rate_lot import ExchangeRateLot
+from app.models.fx_conversion import FxConversion
 from app.models.ledger_entry import LedgerEntry
 from app.models.transaction import Transaction
 from app.models.transaction_component import TransactionComponent
 from app.models.common import utcnow
 from app.schemas.posting import (
     ExpensePayload,
+    FxConversionPayload,
     OpeningBalancePayload,
     PaymentPayload,
     ReceiptPayload,
@@ -30,11 +33,18 @@ from app.services.posting.builders import (
     build_bank_transfer_preview,
     build_cash_handover_preview,
     build_expense_preview,
+    build_fx_conversion_preview,
     build_opening_balance_preview,
     build_payment_preview,
     build_receipt_preview,
 )
 from app.services.posting.dtos import ComponentDraft, LedgerEntryDraft, PostingPreview
+from app.services.posting.fx_lot_service import (
+    create_exchange_rate_lot,
+    persist_lot_consumptions,
+    plan_fifo_lot_consumption,
+    restore_lot_consumptions_for_fx,
+)
 
 
 def _next_transaction_no(db: Session) -> str:
@@ -154,6 +164,60 @@ def _persist_preview(
     if preview.transaction_type == TransactionType.OPENING_BALANCE.value:
         account = db.get(Account, payload.account_id)
         account.opening_balance = payload.amount
+        create_exchange_rate_lot(
+            db,
+            account_id=payload.account_id,
+            currency=payload.currency,
+            base_currency=payload.base_currency,
+            source_transaction_id=transaction.id,
+            amount=payload.amount,
+            original_rate=payload.original_rate,
+        )
+
+    if preview.transaction_type == TransactionType.RECEIPT.value and getattr(payload, "original_rate", None) is not None:
+        create_exchange_rate_lot(
+            db,
+            account_id=payload.receiving_account_id,
+            currency=payload.currency,
+            base_currency=payload.base_currency,
+            source_transaction_id=transaction.id,
+            amount=payload.gross_amount,
+            original_rate=payload.original_rate,
+        )
+
+    if preview.transaction_type == TransactionType.CURRENCY_EXCHANGE.value:
+        fx_detail = preview.fx_detail or {}
+        fx = FxConversion(
+            transaction_id=transaction.id,
+            settlement_id=settlement_id,
+            from_account_id=payload.from_account_id,
+            to_account_id=payload.to_account_id,
+            from_currency=payload.from_currency,
+            to_currency=payload.to_currency,
+            from_amount=payload.from_amount,
+            to_amount=payload.to_amount,
+            costing_method=payload.costing_method,
+            original_rate=fx_detail["weighted_avg_rate"],
+            actual_rate=fx_detail["actual_rate"],
+            weighted_avg_rate=fx_detail["weighted_avg_rate"],
+            base_currency=payload.base_currency,
+            original_base_value=fx_detail["original_base_value"],
+            actual_base_value=fx_detail["actual_base_value"],
+            fx_difference=fx_detail["fx_difference"],
+            fx_charge=payload.fx_charge,
+        )
+        db.add(fx)
+        db.flush()
+        plan = plan_fifo_lot_consumption(
+            db,
+            account_id=payload.from_account_id,
+            currency=payload.from_currency,
+            base_currency=payload.base_currency,
+            amount=payload.from_amount,
+            allow_insufficient_lots=payload.allow_insufficient_lots,
+            source_lot_id=payload.source_lot_id,
+        )
+        persist_lot_consumptions(db, fx_conversion_id=fx.id, plan=plan)
 
     audit = write_audit_log(
         db,
@@ -223,6 +287,13 @@ def post_expense(db: Session, payload: ExpensePayload) -> tuple[PostingPreview, 
     return preview, transaction, audit_id
 
 
+def post_fx_conversion(db: Session, payload: FxConversionPayload) -> tuple[PostingPreview, Transaction, int | None]:
+    preview = build_fx_conversion_preview(db, payload)
+    transaction, audit_id = _persist_preview(db, preview=preview, payload=payload, created_by_user_id=payload.created_by_user_id, description=payload.description, transaction_date=payload.transaction_date, settlement_id=payload.settlement_id)
+    db.commit()
+    return preview, transaction, audit_id
+
+
 def build_reversal_preview(db: Session, transaction_id: int, payload: ReversePayload) -> PostingPreview:
     original = db.get(Transaction, transaction_id)
     if original is None:
@@ -231,6 +302,13 @@ def build_reversal_preview(db: Session, transaction_id: int, payload: ReversePay
         raise HTTPException(status_code=400, detail="Only posted transactions can be reversed")
     if db.query(Transaction).filter(Transaction.reversed_transaction_id == transaction_id).one_or_none():
         raise HTTPException(status_code=400, detail="Transaction has already been reversed")
+    created_lots = (
+        db.query(ExchangeRateLot)
+        .filter(ExchangeRateLot.source_transaction_id == transaction_id)
+        .all()
+    )
+    if any(lot.remaining_amount != lot.original_amount for lot in created_lots):
+        raise HTTPException(status_code=400, detail="Cannot reverse transaction with consumed FX lots")
 
     original_components = (
         db.query(TransactionComponent)
@@ -315,6 +393,13 @@ def post_reversal(db: Session, transaction_id: int, payload: ReversePayload) -> 
         reversal_reason=payload.reversal_reason,
         reversed_transaction_id=original.id,
     )
+    original_fx = db.query(FxConversion).filter(FxConversion.transaction_id == original.id).one_or_none()
+    if original_fx is not None:
+        restore_lot_consumptions_for_fx(db, fx_conversion_id=original_fx.id)
+    for lot in db.query(ExchangeRateLot).filter(ExchangeRateLot.source_transaction_id == original.id).all():
+        lot.remaining_amount = Decimal("0")
+        lot.remaining_base_value = Decimal("0")
+        lot.status = "reversed"
     original.status = TransactionStatus.REVERSED.value
     db.commit()
     return preview, transaction, audit_id

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.schemas.posting import (
     ExpensePayload,
+    FxConversionPayload,
     OpeningBalancePayload,
     PaymentPayload,
     PostingPreviewRead,
@@ -20,6 +21,7 @@ from app.services.posting.builders import (
     build_bank_transfer_preview,
     build_cash_handover_preview,
     build_expense_preview,
+    build_fx_conversion_preview,
     build_opening_balance_preview,
     build_payment_preview,
     build_receipt_preview,
@@ -121,6 +123,18 @@ def preview_expense(payload: ExpensePayload, db: Session = Depends(get_db)):
 def post_expense(request: PostingRequest, db: Session = Depends(get_db)):
     payload = _payload_from_post(request, ExpensePayload)
     preview, transaction, audit_id = posting_service.post_expense(db, payload)
+    return _post_response(preview, transaction, audit_id)
+
+
+@router.post("/fx-conversion/preview", response_model=PostingPreviewRead)
+def preview_fx_conversion(payload: FxConversionPayload, db: Session = Depends(get_db)):
+    return _preview_response(build_fx_conversion_preview(db, payload))
+
+
+@router.post("/fx-conversion/post", response_model=PostingResultRead, status_code=status.HTTP_201_CREATED)
+def post_fx_conversion(request: PostingRequest, db: Session = Depends(get_db)):
+    payload = _payload_from_post(request, FxConversionPayload)
+    preview, transaction, audit_id = posting_service.post_fx_conversion(db, payload)
     return _post_response(preview, transaction, audit_id)
 
 

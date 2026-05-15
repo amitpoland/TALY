@@ -57,6 +57,7 @@ class PostingPreviewRead(BaseModel):
     profitability_effect: dict[str, Decimal]
     warnings: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+    fx_detail: dict[str, Decimal | str] | None = None
 
 
 class PostingResultRead(PostingPreviewRead):
@@ -79,6 +80,8 @@ class OpeningBalancePayload(BasePostingPayload):
     equity_account_id: int
     amount: Decimal
     currency: str
+    base_currency: str | None = None
+    original_rate: Decimal | None = None
 
 
 class ReceiptPayload(BasePostingPayload):
@@ -89,6 +92,8 @@ class ReceiptPayload(BasePostingPayload):
     currency: str
     commission_amount: Decimal = Decimal("0")
     commission_income_account_id: int | None = None
+    base_currency: str | None = None
+    original_rate: Decimal | None = None
 
     @model_validator(mode="after")
     def validate_receipt_amounts(self):
@@ -130,6 +135,42 @@ class ExpensePayload(BasePostingPayload):
     currency: str
     expense_type: str = "other"
     affects_settlement: bool = False
+
+
+class FxConversionPayload(BasePostingPayload):
+    from_account_id: int
+    to_account_id: int
+    source_clearing_account_id: int
+    target_clearing_account_id: int
+    fx_gain_loss_account_id: int
+    fx_charge_account_id: int | None = None
+    from_amount: Decimal
+    to_amount: Decimal
+    from_currency: str
+    to_currency: str
+    base_currency: str
+    costing_method: str = "fifo"
+    source_lot_id: int | None = None
+    fx_charge: Decimal = Decimal("0")
+    allow_insufficient_lots: bool = False
+
+    @model_validator(mode="after")
+    def validate_fx_conversion(self):
+        if self.from_currency == self.to_currency:
+            raise ValueError("FX conversion currencies must differ")
+        if self.to_currency != self.base_currency:
+            raise ValueError("Phase 3 FX conversion requires to_currency to equal base_currency")
+        if self.from_amount <= 0 or self.to_amount <= 0:
+            raise ValueError("FX amounts must be positive")
+        if self.fx_charge < 0:
+            raise ValueError("FX charge cannot be negative")
+        if self.fx_charge > 0 and self.fx_charge_account_id is None:
+            raise ValueError("FX charge account is required when fx_charge is present")
+        if self.costing_method not in {"fifo", "transaction_wise"}:
+            raise ValueError("FX costing method must be fifo or transaction_wise")
+        if self.costing_method == "transaction_wise" and self.source_lot_id is None:
+            raise ValueError("Transaction-wise FX costing requires source_lot_id")
+        return self
 
 
 class ReversePayload(MoneyModel):
