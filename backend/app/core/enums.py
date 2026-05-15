@@ -30,6 +30,53 @@ class NormalBalance(StrEnum):
     CREDIT = "credit"
 
 
+class TransactionType(StrEnum):
+    OPENING_BALANCE = "opening_balance"
+    RECEIPT = "receipt"
+    PAYMENT = "payment"
+    CASH_HANDOVER = "cash_handover"
+    BANK_TRANSFER = "bank_transfer"
+    EXPENSE = "expense"
+    REVERSAL = "reversal"
+
+
+class TransactionStatus(StrEnum):
+    POSTED = "posted"
+    REVERSED = "reversed"
+
+
+class ComponentType(StrEnum):
+    OPENING_BALANCE = "opening_balance"
+    GROSS_RECEIPT = "gross_receipt"
+    PRINCIPAL = "principal"
+    YOUR_COMMISSION = "your_commission"
+    CASH_MOVEMENT = "cash_movement"
+    BANK_MOVEMENT = "bank_movement"
+    EXPENSE = "expense"
+    REVERSAL = "reversal"
+
+
+class Direction(StrEnum):
+    IN = "in"
+    OUT = "out"
+    NEUTRAL = "neutral"
+
+
+class SettlementEffectType(StrEnum):
+    PRINCIPAL_IN = "principal_in"
+    PRINCIPAL_OUT = "principal_out"
+    CHARGE_IN_SETTLEMENT = "charge_in_settlement"
+    ADJUSTMENT_IN = "adjustment_in"
+    ADJUSTMENT_OUT = "adjustment_out"
+    NONE = "none"
+
+
+class ProfitabilityEffectType(StrEnum):
+    INCOME = "income"
+    EXPENSE = "expense"
+    NONE = "none"
+
+
 ACCOUNT_NORMAL_BALANCE: dict[AccountType, NormalBalance] = {
     AccountType.CASH: NormalBalance.DEBIT,
     AccountType.BANK: NormalBalance.DEBIT,
@@ -45,4 +92,3 @@ ACCOUNT_NORMAL_BALANCE: dict[AccountType, NormalBalance] = {
     AccountType.FX_GAIN_LOSS: NormalBalance.CREDIT,
     AccountType.OWNER_EQUITY: NormalBalance.CREDIT,
 }
-

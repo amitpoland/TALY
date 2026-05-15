@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.api import accounts, audit_logs, health, parties, roles, users
+from app.api import accounts, audit_logs, health, parties, roles, settlements, transactions, users
 
 
 def create_app() -> FastAPI:
@@ -10,9 +10,10 @@ def create_app() -> FastAPI:
     app.include_router(users.router)
     app.include_router(parties.router)
     app.include_router(accounts.router)
+    app.include_router(transactions.router)
+    app.include_router(settlements.router)
     app.include_router(audit_logs.router)
     return app
 
 
 app = create_app()
-
