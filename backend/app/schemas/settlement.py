@@ -2,7 +2,49 @@ from decimal import Decimal
 
 from pydantic import BaseModel, field_validator
 
-from app.schemas.common import MoneyModel
+from app.schemas.common import MoneyModel, ORMModel
+
+
+class SettlementCreate(BaseModel):
+    settlement_no: str
+    title: str
+    primary_party_id: int | None = None
+    base_currency: str = "USD"
+
+    @field_validator("settlement_no", "title", "base_currency")
+    @classmethod
+    def required_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Value is required")
+        return value.strip()
+
+
+class SettlementUpdate(BaseModel):
+    title: str | None = None
+    primary_party_id: int | None = None
+    base_currency: str | None = None
+
+    @field_validator("title", "base_currency")
+    @classmethod
+    def optional_text(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("Value cannot be blank")
+        return value.strip() if value is not None else None
+
+
+class SettlementRead(ORMModel):
+    id: int
+    settlement_no: str
+    title: str
+    primary_party_id: int | None
+    status: str
+    base_currency: str
+    opened_at: str
+    closed_at: str | None
+    closed_by_user_id: int | None
+    approved_pending_amount: Decimal
+    approved_pending_currency: str | None
+    approved_pending_reason: str | None
 
 
 class SettlementCloseRequest(MoneyModel):
@@ -45,4 +87,3 @@ class SettlementClosurePreviewRead(BaseModel):
     warnings: list[str]
     errors: list[str]
     can_close: bool
-

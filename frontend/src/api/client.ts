@@ -103,6 +103,10 @@ export const api = {
   createAccount: (payload: ApiRecord) => request<ApiRecord>("/accounts", { method: "POST", body: JSON.stringify(payload) }),
   users: () => request<ApiRecord[]>("/users"),
   auditLogs: () => request<ApiRecord[]>("/audit-logs"),
+  settlements: () => request<ApiRecord[]>("/settlements"),
+  settlement: (id: string | number) => request<ApiRecord>(`/settlements/${id}`),
+  createSettlement: (payload: ApiRecord) => request<ApiRecord>("/settlements", { method: "POST", body: JSON.stringify(payload) }),
+  updateSettlement: (id: string | number, payload: ApiRecord) => request<ApiRecord>(`/settlements/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   report: (path: string, filters: ApiRecord = {}) => request<ReportResponse>(`${path}${query(filters as Record<string, string | number>)}`),
   settlementBalance: (id: string | number) => request<ApiRecord>(`/settlements/${id}/balance`),
   previewTransaction: (key: TransactionRouteKey, payload: ApiRecord) =>

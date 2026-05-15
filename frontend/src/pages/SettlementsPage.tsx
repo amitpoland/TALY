@@ -1,3 +1,4 @@
+import { FormEvent, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { api } from "../api/client";
@@ -6,25 +7,46 @@ import { ErrorState, LoadingState } from "../components/StateBlocks";
 import { useAsync } from "../hooks/useAsync";
 
 export default function SettlementsPage() {
-  const { data, loading, error } = useAsync(async () => {
-    const [pending, closed] = await Promise.all([
-      api.report("/reports/pending-settlements"),
-      api.report("/reports/closed-settlements")
-    ]);
-    return [...pending.rows, ...closed.rows];
-  }, []);
+  const { data, loading, error, reload } = useAsync(api.settlements, []);
+  const [form, setForm] = useState({ settlement_no: "", title: "", primary_party_id: "", base_currency: "USD" });
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setSubmitError(null);
+    try {
+      await api.createSettlement({
+        settlement_no: form.settlement_no,
+        title: form.title,
+        primary_party_id: form.primary_party_id ? Number(form.primary_party_id) : null,
+        base_currency: form.base_currency
+      });
+      setForm({ settlement_no: "", title: "", primary_party_id: "", base_currency: "USD" });
+      reload();
+    } catch (err) {
+      setSubmitError((err as Error).message);
+    }
+  }
 
   const rows = (data ?? []).map((row) => ({
     ...row,
-    detail: <Link to={`/settlements/${row.settlement_id}`}>Open</Link>
+    detail: <Link to={`/settlements/${row.id}`}>Open</Link>
   }));
 
   return (
     <section>
-      <header className="page-header"><div><h1>Settlements</h1><p>Open, reopened, and closed settlement chains from report data.</p></div></header>
+      <header className="page-header"><div><h1>Settlements</h1><p>Create and review settlement chains.</p></div></header>
+      <form className="toolbar form-grid" onSubmit={submit}>
+        <input required placeholder="Settlement No" value={form.settlement_no} onChange={(event) => setForm({ ...form, settlement_no: event.target.value.toUpperCase() })} />
+        <input required placeholder="Title" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} />
+        <input placeholder="Primary Party ID" value={form.primary_party_id} onChange={(event) => setForm({ ...form, primary_party_id: event.target.value })} />
+        <input required placeholder="Base Currency" value={form.base_currency} onChange={(event) => setForm({ ...form, base_currency: event.target.value.toUpperCase() })} />
+        <button type="submit">Add Settlement</button>
+      </form>
+      {submitError && <ErrorState message={submitError} />}
       {loading && <LoadingState label="Loading settlements" />}
       {error && <ErrorState message={error} />}
-      {data && <DataTable rows={rows} columns={["settlement_id", "settlement_no", "title", "status", "base_currency", "opened_at", "closed_at", "detail"]} />}
+      {data && <DataTable rows={rows} columns={["id", "settlement_no", "title", "primary_party_id", "status", "base_currency", "opened_at", "closed_at", "detail"]} />}
     </section>
   );
 }

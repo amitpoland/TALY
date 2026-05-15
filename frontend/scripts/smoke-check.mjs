@@ -13,6 +13,8 @@ const requiredRoutes = [
   "/transactions/receipt/preview",
   "/transactions/receipt/post",
   "/transactions/fx-conversion/preview",
+  "/settlements",
+  "/settlements/${id}",
   "/reports/dashboard",
   "/audit-logs"
 ];

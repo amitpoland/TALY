@@ -9,11 +9,12 @@ export default function SettlementDetailPage() {
   const { settlementId } = useParams();
   const { data, loading, error } = useAsync(async () => {
     if (!settlementId) throw new Error("Settlement ID is required");
-    const [balance, chain] = await Promise.all([
+    const [settlement, balance, chain] = await Promise.all([
+      api.settlement(settlementId),
       api.settlementBalance(settlementId),
       api.report("/reports/settlement-chain", { settlement_id: settlementId })
     ]);
-    return { balance, chain };
+    return { settlement, balance, chain };
   }, [settlementId]);
 
   return (
@@ -24,6 +25,8 @@ export default function SettlementDetailPage() {
       {data && (
         <>
           <div className="summary-strip">
+            <span>No: <strong>{String(data.settlement.settlement_no)}</strong></span>
+            <span>Title: <strong>{String(data.settlement.title)}</strong></span>
             <span>Status: <strong>{String(data.balance.status)}</strong></span>
             <span>Balanced: <strong>{String(data.balance.is_balanced_by_currency)}</strong></span>
             <span>Balances: <strong>{JSON.stringify(data.balance.balances ?? {})}</strong></span>
