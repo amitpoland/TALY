@@ -5,6 +5,8 @@ __pycache__/
 *.sqlite3
 *.sqlite
 .env
+node_modules/
+dist/
 app-data/
 backups/
 imports/
