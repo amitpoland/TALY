@@ -32,10 +32,17 @@ export type PreviewResponse = {
   fx_detail?: ApiRecord | null;
 };
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, "");
+function apiBaseUrl(): string {
+  const configured = import.meta.env.VITE_API_BASE_URL?.trim();
+  const base = configured || "http://127.0.0.1:8000";
+  return base.replace(/\/api\/?$/, "").replace(/\/$/, "");
+}
+
+const API_BASE = apiBaseUrl();
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const url = `${API_BASE}${path}`;
+  const response = await fetch(url, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -46,7 +53,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const data = text ? JSON.parse(text) : null;
   if (!response.ok) {
     const detail = data?.detail;
-    const message = Array.isArray(detail) ? detail.map((item) => item.msg ?? JSON.stringify(item)).join(", ") : detail ?? `${response.status} ${response.statusText} at ${path}`;
+    const backendMessage = Array.isArray(detail) ? detail.map((item) => item.msg ?? JSON.stringify(item)).join(", ") : detail;
+    const message = backendMessage ? `${backendMessage} (${response.status} at ${url})` : `${response.status} ${response.statusText} at ${url}`;
     throw new Error(message);
   }
   return data as T;
