@@ -91,6 +91,57 @@ def opening_payload(user: User, account: Account, equity: Account, amount: str =
     }
 
 
+def test_payment_preview_succeeds_with_seeded_local_user(
+    client: TestClient, db_session: Session
+) -> None:
+    user = db_session.query(User).filter(User.username == "local-operator").one()
+    bank = create_account(db_session, "BANK-SEED-USD", "bank")
+    clearing = create_account(db_session, "CLIENT-SEED-USD", "customer_wallet")
+    bank.current_balance = Decimal("100.00")
+    db_session.commit()
+
+    response = client.post(
+        "/transactions/payment/preview",
+        json={
+            "transaction_date": "2026-05-15",
+            "created_by_user_id": user.id,
+            "paying_account_id": bank.id,
+            "clearing_account_id": clearing.id,
+            "amount": "25.00",
+            "currency": "USD",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["transaction_type"] == "payment"
+
+
+def test_payment_preview_without_active_user_returns_clear_seed_message(
+    client: TestClient, db_session: Session
+) -> None:
+    db_session.query(User).delete()
+    db_session.commit()
+    bank = create_account(db_session, "BANK-NOUSER-USD", "bank")
+    clearing = create_account(db_session, "CLIENT-NOUSER-USD", "customer_wallet")
+    bank.current_balance = Decimal("100.00")
+    db_session.commit()
+
+    response = client.post(
+        "/transactions/payment/preview",
+        json={
+            "transaction_date": "2026-05-15",
+            "created_by_user_id": 1,
+            "paying_account_id": bank.id,
+            "clearing_account_id": clearing.id,
+            "amount": "25.00",
+            "currency": "USD",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "No active local user found. Run seed command."
+
+
 def test_opening_balance_transaction_updates_balances(client: TestClient, db_session: Session) -> None:
     user = create_user(db_session)
     cash = create_account(db_session, "CASH-USD", "cash")

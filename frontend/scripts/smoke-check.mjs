@@ -81,6 +81,9 @@ for (const required of ['data-searchable="true"', "onKeyDown", "ctrlKey", "metaK
     throw new Error(`Voucher workflow behavior missing ${required}`);
   }
 }
+if (!transactionSource.includes("No active local user found. Run seed command.")) {
+  throw new Error("Voucher UI must block preview when no active local user exists");
+}
 for (const required of ["No {currency} Client Balance exists", "Create Client Balance", "createPartyWallet", "partyWallet", "api.currencies()"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Client balance voucher logic missing ${required}`);

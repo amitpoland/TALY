@@ -35,6 +35,9 @@ def get_account(db: Session, account_id: int) -> Account:
 def ensure_user(db: Session, user_id: int) -> None:
     user = db.get(User, user_id)
     if user is None or not user.is_active:
+        has_active_user = db.query(User.id).filter(User.is_active.is_(True)).first() is not None
+        if not has_active_user:
+            raise HTTPException(status_code=400, detail="No active local user found. Run seed command.")
         raise HTTPException(status_code=400, detail="User is not active or does not exist")
 
 

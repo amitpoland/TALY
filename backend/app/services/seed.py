@@ -2,10 +2,12 @@ import json
 
 from sqlalchemy.orm import Session
 
+from app.core.security import hash_password
 from app.models.app_setting import AppSetting
 from app.models.common import utcnow
 from app.models.currency import Currency
 from app.models.role import Role
+from app.models.user import User
 
 
 ROLE_PERMISSIONS = {
@@ -49,6 +51,13 @@ SETTINGS = {
     },
 }
 
+DEFAULT_LOCAL_USER = {
+    "username": "local-operator",
+    "password": "change-me-local",
+    "full_name": "Local Operator",
+    "role": "operator",
+}
+
 
 def seed_foundation_data(db: Session) -> None:
     now = utcnow()
@@ -63,6 +72,25 @@ def seed_foundation_data(db: Session) -> None:
                     updated_at=now,
                 )
             )
+    db.flush()
+
+    operator_role = db.query(Role).filter(Role.name == DEFAULT_LOCAL_USER["role"]).one()
+    local_user = db.query(User).filter(User.username == DEFAULT_LOCAL_USER["username"]).one_or_none()
+    if local_user is None:
+        db.add(
+            User(
+                username=DEFAULT_LOCAL_USER["username"],
+                password_hash=hash_password(DEFAULT_LOCAL_USER["password"]),
+                full_name=DEFAULT_LOCAL_USER["full_name"],
+                role_id=operator_role.id,
+                is_active=True,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+    elif not local_user.is_active:
+        local_user.is_active = True
+        local_user.updated_at = now
 
     for code, name, decimal_places in CURRENCIES:
         currency = db.get(Currency, code)
@@ -82,4 +110,3 @@ def seed_foundation_data(db: Session) -> None:
             db.add(AppSetting(key=key, value_json=json.dumps(value), updated_at=now))
 
     db.commit()
-

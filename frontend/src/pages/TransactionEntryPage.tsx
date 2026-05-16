@@ -145,7 +145,12 @@ function findParty(parties: Party[], id: string) {
 }
 
 function defaultUserId(users: ApiRecord[]): number {
-  return asId(users[0]?.id) ?? 1;
+  const activeUser = users.find((user) => user.is_active !== false && asId(user.id));
+  const id = asId(activeUser?.id);
+  if (!id) {
+    throw new Error("No active local user found. Run seed command.");
+  }
+  return id;
 }
 
 function SearchSelect({
@@ -679,6 +684,9 @@ function OpeningBalanceVoucher({ lookups, submit, busy }: VoucherProps) {
 }
 
 function VoucherForm(props: VoucherProps) {
+  if (!props.lookups.users.some((user) => user.is_active !== false && asId(user.id))) {
+    return <ErrorState message="No active local user found. Run seed command." />;
+  }
   if (props.routeKey === "receipt") return <ReceiptVoucher {...props} />;
   if (props.routeKey === "payment") return <PaymentVoucher {...props} />;
   if (props.routeKey === "cashHandover" || props.routeKey === "bankTransfer") return <TransferVoucher {...props} />;
