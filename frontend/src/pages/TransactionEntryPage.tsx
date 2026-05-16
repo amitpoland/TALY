@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { NavLink } from "react-router-dom";
 
 import { ApiRecord, api, PreviewResponse, TransactionRouteKey, transactionRoutes } from "../api/client";
@@ -46,16 +46,32 @@ type Lookups = {
   currencies: Currency[];
 };
 
+type SearchOption = {
+  value: string;
+  label: string;
+  keywords?: string;
+};
+
 const DEFAULT_BASE_CURRENCY = "USD";
 
+const routeTitles: Record<TransactionRouteKey, string> = {
+  openingBalance: "Opening Balance",
+  receipt: "Receive Money",
+  payment: "Pay Money",
+  cashHandover: "Cash Handover",
+  bankTransfer: "Bank Transfer",
+  expense: "Expense",
+  fxConversion: "Currency Exchange"
+};
+
 const routeHelp: Record<TransactionRouteKey, string> = {
-  openingBalance: "Set an initial balance through the posting engine.",
-  receipt: "Record money received from a party with optional included commission.",
-  payment: "Record money paid out against a settlement.",
-  cashHandover: "Move cash or wallet balance between two accounts.",
-  bankTransfer: "Move balance between bank accounts.",
-  expense: "Record expenses, charges, and settlement-affecting costs.",
-  fxConversion: "Convert currency using backend FIFO lot preview and posting."
+  openingBalance: "Set the starting amount for a cash, bank, or client balance.",
+  receipt: "Record money received. The system prepares the accounting preview before posting.",
+  payment: "Record money paid out. The system prepares the accounting preview before posting.",
+  cashHandover: "Move cash from one place to another.",
+  bankTransfer: "Move money between bank accounts.",
+  expense: "Record fees, charges, and operating costs.",
+  fxConversion: "Exchange one currency into another and preview the exchange difference."
 };
 
 function asId(value: unknown): number | undefined {
@@ -77,16 +93,21 @@ function settlementId(settlement: Settlement): number | undefined {
   return settlement.id ?? settlement.settlement_id;
 }
 
-function accountLabel(account: Account): string {
-  return `${account.account_code} - ${account.name} (${account.account_type}, ${account.currency})`;
+function autoSettlementId(settlements: Settlement[]): number | undefined {
+  const active = settlements.filter((item) => ["open", "reopened"].includes(String(item.status).toLowerCase()));
+  return active.length === 1 ? settlementId(active[0]) : undefined;
 }
 
-function settlementLabel(settlement: Settlement): string {
-  return `${settlement.settlement_no} - ${settlement.title ?? settlement.status} (${settlement.base_currency})`;
+function cleanAccountName(name: string): string {
+  return name.replace(/\bwallet\b/gi, "Balance").replace(/\bledger\b/gi, "Account");
+}
+
+function accountLabel(account: Account): string {
+  return `${cleanAccountName(account.name)} (${account.currency})`;
 }
 
 function partyLabel(party: Party): string {
-  return `${party.name} (${party.party_type}${party.default_currency ? `, ${party.default_currency}` : ""})`;
+  return party.default_currency ? `${party.name} (${party.default_currency})` : party.name;
 }
 
 function walletTypeForParty(party?: Party): string {
@@ -104,7 +125,7 @@ function partyWallet(accounts: Account[], party?: Party, currency?: string): Acc
 }
 
 function walletCode(party: Party, currency: string): string {
-  return `${party.name.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toUpperCase()}-${currency}-WALLET`;
+  return `${party.name.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toUpperCase()}-${currency}-BALANCE`;
 }
 
 function options(accounts: Account[], types: string[], currency?: string) {
@@ -123,119 +144,198 @@ function findParty(parties: Party[], id: string) {
   return parties.find((party) => party.id === Number(id));
 }
 
-function clearingAccount(accounts: Account[], partyId: string, currency: string): Account | undefined {
-  const partyAccount = accounts.find((account) => account.party_id === Number(partyId) && account.currency === currency && ["customer_wallet", "agent_wallet", "fx_dealer_wallet", "clearing"].includes(account.account_type));
-  return partyAccount ?? accounts.find((account) => account.account_type === "clearing" && account.currency === currency);
+function defaultUserId(users: ApiRecord[]): number {
+  return asId(users[0]?.id) ?? 1;
+}
+
+function SearchSelect({
+  label,
+  value,
+  onChange,
+  options: selectOptions,
+  placeholder,
+  required = false
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: SearchOption[];
+  placeholder?: string;
+  required?: boolean;
+}) {
+  const selected = selectOptions.find((option) => option.value === value);
+  const [text, setText] = useState(selected?.label ?? "");
+  const listId = useMemo(() => `search-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Math.random().toString(36).slice(2)}`, [label]);
+
+  useEffect(() => {
+    setText(selected?.label ?? "");
+  }, [selected?.label]);
+
+  function choose(nextText: string) {
+    setText(nextText);
+    const normalized = nextText.trim().toLowerCase();
+    const exact = selectOptions.find((option) => option.label.toLowerCase() === normalized);
+    if (exact) {
+      onChange(exact.value);
+    } else if (!nextText.trim()) {
+      onChange("");
+    }
+  }
+
+  return (
+    <label data-searchable="true">
+      <span>{label}</span>
+      <input
+        required={required}
+        list={listId}
+        value={text}
+        placeholder={placeholder ?? `Search ${label.toLowerCase()}`}
+        onChange={(event) => choose(event.target.value)}
+        onBlur={() => setText(selected?.label ?? text)}
+      />
+      <datalist id={listId}>
+        {selectOptions.map((option) => (
+          <option key={option.value} value={option.label}>{option.keywords}</option>
+        ))}
+      </datalist>
+    </label>
+  );
 }
 
 function currencySelect(currencies: Currency[], value: string, onChange: (value: string) => void, label = "Currency") {
   return (
-    <label>
-      <span>{label}</span>
-      <select required value={value} onChange={(event) => onChange(event.target.value)}>
-        {currencies.map((currency) => <option key={currency.code} value={currency.code}>{currency.code} - {currency.name}</option>)}
-      </select>
-    </label>
+    <SearchSelect
+      label={label}
+      value={value}
+      onChange={onChange}
+      options={currencies.map((currency) => ({ value: currency.code, label: `${currency.code} - ${currency.name}`, keywords: currency.code }))}
+      required
+    />
   );
 }
 
 function accountSelect(accounts: Account[], value: string, onChange: (value: string) => void, label: string, types: string[], currency?: string, required = true) {
   return (
-    <label>
-      <span>{label}</span>
-      <select required={required} value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">Select {label}</option>
-        {options(accounts, types, currency).map((account) => (
-          <option key={account.id} value={account.id}>{accountLabel(account)}</option>
-        ))}
-      </select>
-    </label>
+    <SearchSelect
+      label={label}
+      value={value}
+      onChange={onChange}
+      options={options(accounts, types, currency).map((account) => ({
+        value: String(account.id),
+        label: accountLabel(account),
+        keywords: `${account.account_code} ${account.currency}`
+      }))}
+      required={required}
+    />
   );
 }
 
-function partySelect(parties: Party[], value: string, onChange: (value: string) => void, required = false) {
+function partySelect(parties: Party[], value: string, onChange: (value: string) => void, required = false, label = "Client") {
   return (
-    <label>
-      <span>Party</span>
-      <select required={required} value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">Select party</option>
-        {parties.map((party) => <option key={party.id} value={party.id}>{partyLabel(party)}</option>)}
-      </select>
-    </label>
+    <SearchSelect
+      label={label}
+      value={value}
+      onChange={onChange}
+      options={parties.map((party) => ({
+        value: String(party.id),
+        label: partyLabel(party),
+        keywords: `${party.name} ${party.party_type} ${party.default_currency ?? ""}`
+      }))}
+      required={required}
+    />
   );
 }
 
-function settlementSelect(settlements: Settlement[], value: string, onChange: (value: string) => void) {
-  return (
-    <label>
-      <span>Settlement</span>
-      <select value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">No settlement selected</option>
-        {settlements.map((settlement) => {
-          const id = settlementId(settlement);
-          return id ? <option key={id} value={id}>{settlementLabel(settlement)}</option> : null;
-        })}
-      </select>
-    </label>
-  );
-}
+function PreviewPanel({
+  preview,
+  payload,
+  routeKey,
+  onPost,
+  posting
+}: {
+  preview: PreviewResponse;
+  payload: ApiRecord | null;
+  routeKey: TransactionRouteKey;
+  onPost: () => void;
+  posting: boolean;
+}) {
+  const currency = String(payload?.currency ?? payload?.to_currency ?? preview.gross_currency ?? "");
+  const component = (type: string) => preview.components.find((item) => item.component_type === type);
+  const amountWithCurrency = (value: unknown, fallbackCurrency = currency) => `${value ?? "0.00"} ${fallbackCurrency}`;
+  const summaryRows: { label: string; value: string }[] = [];
 
-function defaultUserId(users: ApiRecord[]): number {
-  return asId(users[0]?.id) ?? 1;
-}
+  if (routeKey === "receipt") {
+    summaryRows.push(
+      { label: "You are receiving", value: amountWithCurrency(payload?.gross_amount) },
+      { label: "Client credited", value: amountWithCurrency(payload?.principal_amount) },
+      { label: "Commission earned", value: amountWithCurrency(payload?.commission_amount) }
+    );
+  } else if (routeKey === "payment") {
+    summaryRows.push(
+      { label: "You are paying", value: amountWithCurrency(payload?.amount) },
+      { label: "Client balance reduced", value: amountWithCurrency(payload?.amount) }
+    );
+  } else if (routeKey === "fxConversion") {
+    const fxDifference = component("fx_gain") ?? component("fx_loss");
+    summaryRows.push(
+      { label: "Given amount", value: amountWithCurrency(payload?.from_amount, String(payload?.from_currency ?? "")) },
+      { label: "Received amount", value: amountWithCurrency(payload?.to_amount, String(payload?.to_currency ?? "")) },
+      { label: "Exchange Difference", value: amountWithCurrency(fxDifference?.amount ?? "0.00", String(fxDifference?.currency ?? payload?.to_currency ?? "")) }
+    );
+  } else {
+    summaryRows.push({ label: "Amount", value: amountWithCurrency(payload?.amount) });
+  }
 
-function PreviewPanel({ preview, onPost, posting }: { preview: PreviewResponse; onPost: () => void; posting: boolean }) {
-  const componentRows = preview.components.map((component) => ({
-    type: component.component_type,
-    amount: `${component.amount ?? ""} ${component.currency ?? ""}`,
-    direction: component.direction,
-    settlement: component.affects_settlement ? component.settlement_effect_type : "",
-    profitability: component.affects_profitability ? component.profitability_effect_type : ""
+  const accountingRows = preview.components.map((item) => ({
+    item: item.component_type,
+    amount: `${item.amount ?? ""} ${item.currency ?? ""}`,
+    direction: item.direction
   }));
-  const movementText = preview.account_balance_effects.length ? `${preview.account_balance_effects.length} account balance movement(s)` : "No balance movement";
 
   return (
     <div className="preview-panel">
-      <div className="summary-strip">
-        <span>Voucher: <strong>{preview.transaction_type}</strong></span>
-        <span>Movement: <strong>{movementText}</strong></span>
-        <span>Settlement effect: <strong>{JSON.stringify(preview.settlement_effect)}</strong></span>
-        <span>Profitability: <strong>{JSON.stringify(preview.profitability_effect)}</strong></span>
-      </div>
       {preview.warnings.length > 0 && <div className="state-block warning">{preview.warnings.join(", ")}</div>}
-      <h2>Business Preview</h2>
-      <DataTable rows={componentRows} />
-      {preview.fx_detail && (
-        <>
-          <h2>FX Preview</h2>
-          <DataTable rows={[preview.fx_detail]} />
-        </>
-      )}
+      <h2>Preview</h2>
+      <div className="operator-preview">
+        {summaryRows.map((row) => (
+          <div key={row.label}>
+            <span>{row.label}</span>
+            <strong>{row.value}</strong>
+          </div>
+        ))}
+      </div>
       <details>
-        <summary>Ledger entries</summary>
+        <summary>Show accounting details</summary>
+        <h2>Voucher details</h2>
+        <DataTable rows={accountingRows} />
+        {preview.fx_detail && (
+          <>
+            <h2>Exchange details</h2>
+            <DataTable rows={[preview.fx_detail]} />
+          </>
+        )}
+        <h2>Posting entries</h2>
         <DataTable rows={preview.ledger_entries} />
-      </details>
-      <details>
-        <summary>Balance effects</summary>
+        <h2>Account changes</h2>
         <DataTable rows={preview.account_balance_effects} />
       </details>
       <button className="primary-action" type="button" onClick={onPost} disabled={posting}>
-        {posting ? "Posting..." : "Confirm and Post"}
+        {posting ? "Posting..." : "Confirm Post"}
       </button>
     </div>
   );
 }
 
-function advancedBlock(children: React.ReactNode) {
+function advancedBlock(children: ReactNode) {
   return <details className="advanced-details"><summary>Advanced details</summary><div className="entry-form compact">{children}</div></details>;
 }
 
-function MissingWalletNotice({ party, currency, onCreate, busy }: { party?: Party; currency: string; onCreate: () => void; busy: boolean }) {
+function MissingBalanceNotice({ party, currency, onCreate, busy }: { party?: Party; currency: string; onCreate: () => void; busy: boolean }) {
   if (!party || !currency) return null;
   return (
     <div className="state-block warning wallet-warning">
-      <span>No {currency} wallet exists for {party.name}. Create {party.name} {currency} Wallet.</span>
-      <button type="button" onClick={onCreate} disabled={busy}>{busy ? "Creating..." : "Create Wallet"}</button>
+      <span>No {currency} Client Balance exists for {party.name}. Create {party.name} {currency} Client Balance.</span>
+      <button type="button" onClick={onCreate} disabled={busy}>{busy ? "Creating..." : "Create Client Balance"}</button>
     </div>
   );
 }
@@ -244,7 +344,7 @@ async function createPartyWallet(party: Party, currency: string) {
   const accountCode = walletCode(party, currency);
   return api.createAccount({
     account_code: accountCode,
-    name: `${party.name} ${currency} Wallet`,
+    name: `${party.name} ${currency} Balance`,
     account_type: walletTypeForParty(party),
     currency,
     party_id: party.id
@@ -263,33 +363,32 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
   const [form, setForm] = useState({
     party: "",
     receiveIn: "",
-    settlement: "",
     currency: "USD",
-    amountMode: "gross",
+    amountMode: "net",
     amount: "",
     commissionType: "none",
     commissionValue: "",
-    baseCurrency: DEFAULT_BASE_CURRENCY,
     exchangeRate: "",
-    description: ""
+    reference: ""
   });
   const [walletBusy, setWalletBusy] = useState(false);
   const receiveAccount = findAccount(lookups.accounts, form.receiveIn);
+  const currency = receiveAccount?.currency ?? form.currency;
   const selectedParty = findParty(lookups.parties, form.party);
   const commissionValue = decimal(form.commissionValue);
   const amount = decimal(form.amount);
   const commission = form.commissionType === "percentage" ? amount * commissionValue / 100 : form.commissionType === "fixed" ? commissionValue : 0;
   const gross = form.amountMode === "gross" ? amount : amount + commission;
   const principal = form.amountMode === "gross" ? amount - commission : amount;
-  const clearing = partyWallet(lookups.accounts, selectedParty, form.currency);
-  const commissionAccount = lookups.accounts.find((account) => account.account_type === "commission_income" && account.currency === form.currency);
-  const canPreview = Boolean(clearing && receiveAccount && principal >= 0 && gross > 0);
+  const clientBalance = partyWallet(lookups.accounts, selectedParty, currency);
+  const commissionAccount = lookups.accounts.find((account) => account.account_type === "commission_income" && account.currency === currency);
+  const canPreview = Boolean(clientBalance && receiveAccount && principal >= 0 && gross > 0);
 
-  async function quickCreateWallet() {
+  async function quickCreateBalance() {
     if (!selectedParty) return;
     setWalletBusy(true);
     try {
-      await createPartyWallet(selectedParty, form.currency);
+      await createPartyWallet(selectedParty, currency);
       refreshLookups();
     } finally {
       setWalletBusy(false);
@@ -302,17 +401,17 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
     submit({
       transaction_date: new Date().toISOString().slice(0, 10),
       created_by_user_id: defaultUserId(lookups.users),
-      settlement_id: asId(form.settlement),
+      settlement_id: autoSettlementId(lookups.settlements),
       receiving_account_id: asId(form.receiveIn),
-      clearing_account_id: clearing?.id,
+      clearing_account_id: clientBalance?.id,
       gross_amount: money(gross),
       principal_amount: money(principal),
       commission_amount: money(commission),
       commission_income_account_id: commission > 0 ? commissionAccount?.id : undefined,
-      currency: form.currency,
-      base_currency: form.baseCurrency || undefined,
+      currency,
+      base_currency: DEFAULT_BASE_CURRENCY,
       original_rate: form.exchangeRate || undefined,
-      description: form.description || undefined
+      description: form.reference || undefined
     });
   }
 
@@ -321,134 +420,179 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
       {partySelect(lookups.parties, form.party, (party) => {
         const selected = findParty(lookups.parties, party);
         setForm({ ...form, party, currency: selected?.default_currency ?? form.currency });
-      }, true)}
+      }, true, "Client")}
       {accountSelect(lookups.accounts, form.receiveIn, (receiveIn) => {
         const selected = findAccount(lookups.accounts, receiveIn);
         setForm({ ...form, receiveIn, currency: selected?.currency ?? form.currency });
-      }, "Receive In", ["cash", "bank"], form.currency)}
-      {settlementSelect(lookups.settlements, form.settlement, (settlement) => setForm({ ...form, settlement }))}
-      {currencySelect(lookups.currencies, form.currency, (currency) => setForm({ ...form, currency }))}
-      <label><span>Amount Mode</span><select value={form.amountMode} onChange={(event) => setForm({ ...form, amountMode: event.target.value })}><option value="gross">Gross amount entered</option><option value="net">Net amount entered</option></select></label>
+      }, "Receive In", ["cash", "bank"])}
+      <label><span>Amount Type</span><select value={form.amountMode} onChange={(event) => setForm({ ...form, amountMode: event.target.value })}><option value="net">Net Received</option><option value="gross">Gross Received</option></select></label>
       <label><span>Amount</span><input required value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
-      <label><span>Commission Type</span><select value={form.commissionType} onChange={(event) => setForm({ ...form, commissionType: event.target.value })}><option value="none">None</option><option value="fixed">Fixed</option><option value="percentage">Percentage</option></select></label>
+      <label><span>Commission</span><select value={form.commissionType} onChange={(event) => setForm({ ...form, commissionType: event.target.value })}><option value="none">none</option><option value="percentage">%</option><option value="fixed">fixed</option></select></label>
       <label><span>Commission Value</span><input value={form.commissionValue} onChange={(event) => setForm({ ...form, commissionValue: event.target.value })} /></label>
-      <label><span>Description/Reference</span><input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
+      <label><span>Reference</span><input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></label>
       <div className="calculation-card">
-        <strong>Calculated voucher</strong>
-        <span>Gross {money(gross)} {form.currency}</span>
-        <span>Principal {money(principal)} {form.currency}</span>
-        <span>Commission {money(commission)} {form.currency}</span>
-        <span>Party wallet {clearing ? accountLabel(clearing) : "Missing"}</span>
-        {receiveAccount && <span>Receive in {accountLabel(receiveAccount)}</span>}
+        <strong>Quick Check</strong>
+        <span>You are receiving {money(gross)} {currency}</span>
+        <span>Client credited {money(principal)} {currency}</span>
+        <span>Commission earned {money(commission)} {currency}</span>
+        {receiveAccount && <span>Money received in {accountLabel(receiveAccount)}</span>}
+        <span>Client Balance {clientBalance ? accountLabel(clientBalance) : "Missing"}</span>
       </div>
-      {!clearing && <MissingWalletNotice party={selectedParty} currency={form.currency} onCreate={quickCreateWallet} busy={walletBusy} />}
-      {advancedBlock(
+      {!clientBalance && <MissingBalanceNotice party={selectedParty} currency={currency} onCreate={quickCreateBalance} busy={walletBusy} />}
+      {currency !== DEFAULT_BASE_CURRENCY && advancedBlock(
         <>
-          <label><span>Base Currency</span><input value={form.baseCurrency} onChange={(event) => setForm({ ...form, baseCurrency: event.target.value.toUpperCase() })} /></label>
           <label><span>Exchange Rate</span><input value={form.exchangeRate} onChange={(event) => setForm({ ...form, exchangeRate: event.target.value })} /></label>
-          {form.currency !== form.baseCurrency && <div className="calculation-card"><span>Base amount preview {money(gross * decimal(form.exchangeRate))} {form.baseCurrency}</span></div>}
+          <div className="calculation-card"><span>Approx. base value {money(gross * decimal(form.exchangeRate))} {DEFAULT_BASE_CURRENCY}</span></div>
         </>
       )}
-      <button type="submit" disabled={busy || !canPreview}>Preview Receipt</button>
+      <button type="submit" disabled={busy || !canPreview}>Preview</button>
     </form>
   );
 }
 
 function PaymentVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
-  const [form, setForm] = useState({ party: "", payFrom: "", settlement: "", currency: "USD", amount: "", description: "" });
+  const [form, setForm] = useState({ party: "", payFrom: "", currency: "USD", amountMode: "net", amount: "", chargeType: "none", chargeValue: "", reference: "" });
   const selectedParty = findParty(lookups.parties, form.party);
-  const clearing = partyWallet(lookups.accounts, selectedParty, form.currency);
+  const payAccount = findAccount(lookups.accounts, form.payFrom);
+  const currency = payAccount?.currency ?? form.currency;
+  const clientBalance = partyWallet(lookups.accounts, selectedParty, currency);
   const [walletBusy, setWalletBusy] = useState(false);
-  async function quickCreateWallet() {
+  const amount = decimal(form.amount);
+  const chargeValue = decimal(form.chargeValue);
+  const charges = form.chargeType === "percentage" ? amount * chargeValue / 100 : form.chargeType === "fixed" ? chargeValue : 0;
+  const netSent = form.amountMode === "net" ? amount : Math.max(amount - charges, 0);
+  const grossSent = form.amountMode === "gross" ? amount : amount + charges;
+  const canPreview = Boolean(clientBalance && payAccount && grossSent > 0);
+
+  async function quickCreateBalance() {
     if (!selectedParty) return;
     setWalletBusy(true);
     try {
-      await createPartyWallet(selectedParty, form.currency);
+      await createPartyWallet(selectedParty, currency);
       refreshLookups();
     } finally {
       setWalletBusy(false);
     }
   }
+
   function onSubmit(event: FormEvent) {
     event.preventDefault();
-    if (!clearing) return;
-    submit({ transaction_date: new Date().toISOString().slice(0, 10), created_by_user_id: defaultUserId(lookups.users), settlement_id: asId(form.settlement), paying_account_id: asId(form.payFrom), clearing_account_id: clearing?.id, amount: form.amount, currency: form.currency, description: form.description || undefined });
+    if (!canPreview) return;
+    submit({
+      transaction_date: new Date().toISOString().slice(0, 10),
+      created_by_user_id: defaultUserId(lookups.users),
+      settlement_id: autoSettlementId(lookups.settlements),
+      paying_account_id: asId(form.payFrom),
+      clearing_account_id: clientBalance?.id,
+      amount: money(netSent),
+      currency,
+      description: form.reference || undefined
+    });
   }
+
   return (
     <form className="entry-form voucher-form" onSubmit={onSubmit}>
-      {partySelect(lookups.parties, form.party, (party) => setForm({ ...form, party }), true)}
+      {partySelect(lookups.parties, form.party, (party) => setForm({ ...form, party }), true, "Client / Vendor")}
       {accountSelect(lookups.accounts, form.payFrom, (payFrom) => {
         const selected = findAccount(lookups.accounts, payFrom);
         setForm({ ...form, payFrom, currency: selected?.currency ?? form.currency });
-      }, "Pay From", ["cash", "bank", "customer_wallet", "agent_wallet", "fx_dealer_wallet"], form.currency)}
-      {settlementSelect(lookups.settlements, form.settlement, (settlement) => setForm({ ...form, settlement }))}
-      {currencySelect(lookups.currencies, form.currency, (currency) => setForm({ ...form, currency }))}
+      }, "Pay From", ["cash", "bank"])}
+      <label><span>Amount Type</span><select value={form.amountMode} onChange={(event) => setForm({ ...form, amountMode: event.target.value })}><option value="net">Net Sent</option><option value="gross">Gross Sent</option></select></label>
       <label><span>Amount</span><input required value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
-      <label><span>Description/Reference</span><input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
-      <div className="calculation-card"><span>Party wallet {clearing ? accountLabel(clearing) : "Missing"}</span></div>
-      {!clearing && <MissingWalletNotice party={selectedParty} currency={form.currency} onCreate={quickCreateWallet} busy={walletBusy} />}
-      <button type="submit" disabled={busy || !clearing}>Preview Payment</button>
+      <label><span>Charges/Commission</span><select value={form.chargeType} onChange={(event) => setForm({ ...form, chargeType: event.target.value })}><option value="none">none</option><option value="percentage">%</option><option value="fixed">fixed</option></select></label>
+      <label><span>Charges Value</span><input value={form.chargeValue} onChange={(event) => setForm({ ...form, chargeValue: event.target.value })} /></label>
+      <label><span>Reference</span><input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></label>
+      <div className="calculation-card">
+        <strong>Quick Check</strong>
+        <span>You are paying {money(netSent)} {currency}</span>
+        <span>Charges shown {money(charges)} {currency}</span>
+        <span>Total cash/bank impact {money(grossSent)} {currency}</span>
+        <span>Client Balance {clientBalance ? accountLabel(clientBalance) : "Missing"}</span>
+      </div>
+      {!clientBalance && <MissingBalanceNotice party={selectedParty} currency={currency} onCreate={quickCreateBalance} busy={walletBusy} />}
+      <button type="submit" disabled={busy || !canPreview}>Preview</button>
     </form>
   );
 }
 
 function TransferVoucher({ lookups, routeKey, submit, busy }: VoucherProps) {
   const isBank = routeKey === "bankTransfer";
-  const accountTypes = isBank ? ["bank"] : ["cash", "customer_wallet", "agent_wallet"];
-  const [form, setForm] = useState({ from: "", to: "", settlement: "", currency: "USD", amount: "", description: "" });
+  const accountTypes = isBank ? ["bank"] : ["cash"];
+  const [form, setForm] = useState({ from: "", to: "", currency: "USD", amount: "", reference: "" });
+
   function onSubmit(event: FormEvent) {
     event.preventDefault();
-    submit({ transaction_date: new Date().toISOString().slice(0, 10), created_by_user_id: defaultUserId(lookups.users), settlement_id: asId(form.settlement), from_account_id: asId(form.from), to_account_id: asId(form.to), amount: form.amount, currency: form.currency, description: form.description || undefined });
+    submit({
+      transaction_date: new Date().toISOString().slice(0, 10),
+      created_by_user_id: defaultUserId(lookups.users),
+      settlement_id: autoSettlementId(lookups.settlements),
+      from_account_id: asId(form.from),
+      to_account_id: asId(form.to),
+      amount: form.amount,
+      currency: form.currency,
+      description: form.reference || undefined
+    });
   }
+
   return (
     <form className="entry-form voucher-form" onSubmit={onSubmit}>
       {accountSelect(lookups.accounts, form.from, (from) => {
         const selected = findAccount(lookups.accounts, from);
         setForm({ ...form, from, currency: selected?.currency ?? form.currency });
-      }, isBank ? "Transfer From" : "Hand Over From", accountTypes, form.currency)}
+      }, isBank ? "Transfer From" : "Hand Over From", accountTypes)}
       {accountSelect(lookups.accounts, form.to, (to) => setForm({ ...form, to }), isBank ? "Transfer To" : "Hand Over To", accountTypes, form.currency)}
-      {settlementSelect(lookups.settlements, form.settlement, (settlement) => setForm({ ...form, settlement }))}
-      {currencySelect(lookups.currencies, form.currency, (currency) => setForm({ ...form, currency }))}
       <label><span>Amount</span><input required value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
-      <label><span>Description/Reference</span><input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
-      <button type="submit" disabled={busy}>Preview {isBank ? "Bank Transfer" : "Cash Handover"}</button>
+      <label><span>Reference</span><input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></label>
+      <button type="submit" disabled={busy}>Preview</button>
     </form>
   );
 }
 
 function ExpenseVoucher({ lookups, submit, busy }: VoucherProps) {
-  const [form, setForm] = useState({ paidFrom: "", expense: "", settlement: "", currency: "USD", amount: "", expenseType: "other", affectsSettlement: false, description: "" });
+  const [form, setForm] = useState({ paidFrom: "", expense: "", currency: "USD", amount: "", expenseType: "other", affectsSettlement: false, reference: "" });
+
   function onSubmit(event: FormEvent) {
     event.preventDefault();
-    submit({ transaction_date: new Date().toISOString().slice(0, 10), created_by_user_id: defaultUserId(lookups.users), settlement_id: asId(form.settlement), payment_account_id: asId(form.paidFrom), expense_account_id: asId(form.expense), amount: form.amount, currency: form.currency, expense_type: form.expenseType || "other", affects_settlement: form.affectsSettlement, description: form.description || undefined });
+    submit({
+      transaction_date: new Date().toISOString().slice(0, 10),
+      created_by_user_id: defaultUserId(lookups.users),
+      settlement_id: autoSettlementId(lookups.settlements),
+      payment_account_id: asId(form.paidFrom),
+      expense_account_id: asId(form.expense),
+      amount: form.amount,
+      currency: form.currency,
+      expense_type: form.expenseType || "other",
+      affects_settlement: form.affectsSettlement,
+      description: form.reference || undefined
+    });
   }
+
   return (
     <form className="entry-form voucher-form" onSubmit={onSubmit}>
       {accountSelect(lookups.accounts, form.paidFrom, (paidFrom) => {
         const selected = findAccount(lookups.accounts, paidFrom);
         setForm({ ...form, paidFrom, currency: selected?.currency ?? form.currency });
-      }, "Paid From", ["cash", "bank", "customer_wallet", "agent_wallet", "fx_dealer_wallet"], form.currency)}
-      {accountSelect(lookups.accounts, form.expense, (expense) => setForm({ ...form, expense }), "Expense Ledger", ["expense", "bank_charge_expense"], form.currency)}
-      {settlementSelect(lookups.settlements, form.settlement, (settlement) => setForm({ ...form, settlement }))}
-      {currencySelect(lookups.currencies, form.currency, (currency) => setForm({ ...form, currency }))}
+      }, "Paid From", ["cash", "bank"])}
+      {accountSelect(lookups.accounts, form.expense, (expense) => setForm({ ...form, expense }), "Expense Type", ["expense", "bank_charge_expense"], form.currency)}
       <label><span>Amount</span><input required value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
-      <label><span>Expense Type</span><input value={form.expenseType} onChange={(event) => setForm({ ...form, expenseType: event.target.value })} /></label>
-      <label className="checkbox-line"><input type="checkbox" checked={form.affectsSettlement} onChange={(event) => setForm({ ...form, affectsSettlement: event.target.checked })} /> <span>Affects settlement</span></label>
-      <label><span>Description/Reference</span><input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
-      <button type="submit" disabled={busy}>Preview Expense</button>
+      <label><span>Category</span><input value={form.expenseType} onChange={(event) => setForm({ ...form, expenseType: event.target.value })} /></label>
+      <label className="checkbox-line"><input type="checkbox" checked={form.affectsSettlement} onChange={(event) => setForm({ ...form, affectsSettlement: event.target.checked })} /> <span>Charge to client</span></label>
+      <label><span>Reference</span><input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></label>
+      <button type="submit" disabled={busy}>Preview</button>
     </form>
   );
 }
 
 function FxVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
-  const [form, setForm] = useState({ party: "", from: "", to: "", settlement: "", fromCurrency: "EUR", toCurrency: "USD", fromAmount: "", toAmount: "", baseCurrency: "USD", costingMethod: "fifo", fxCharge: "0", chargeAccount: "", description: "" });
+  const [form, setForm] = useState({ party: "", fromCurrency: "EUR", toCurrency: "USD", fromAmount: "", toAmount: "", fxCharge: "0", chargeAccount: "", reference: "" });
   const [walletBusy, setWalletBusy] = useState<"from" | "to" | null>(null);
   const selectedParty = findParty(lookups.parties, form.party);
   const fromWallet = partyWallet(lookups.accounts, selectedParty, form.fromCurrency);
   const toWallet = partyWallet(lookups.accounts, selectedParty, form.toCurrency);
   const actualRate = decimal(form.fromAmount) ? decimal(form.toAmount) / decimal(form.fromAmount) : 0;
-  const canPreview = Boolean(fromWallet && toWallet && firstId(lookups.accounts, ["clearing"], form.fromCurrency) && firstId(lookups.accounts, ["clearing"], form.baseCurrency) && firstId(lookups.accounts, ["fx_gain_loss"], form.baseCurrency));
-  async function quickCreateWallet(currency: string, target: "from" | "to") {
+  const canPreview = Boolean(selectedParty && fromWallet && toWallet && firstId(lookups.accounts, ["clearing"], form.fromCurrency) && firstId(lookups.accounts, ["clearing"], form.toCurrency) && firstId(lookups.accounts, ["fx_gain_loss"], form.toCurrency));
+
+  async function quickCreateBalance(currency: string, target: "from" | "to") {
     if (!selectedParty) return;
     setWalletBusy(target);
     try {
@@ -458,70 +602,86 @@ function FxVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
       setWalletBusy(null);
     }
   }
+
   function onSubmit(event: FormEvent) {
     event.preventDefault();
     if (!canPreview) return;
-    submit({ transaction_date: new Date().toISOString().slice(0, 10), created_by_user_id: defaultUserId(lookups.users), settlement_id: asId(form.settlement), from_account_id: fromWallet?.id, to_account_id: toWallet?.id, source_clearing_account_id: firstId(lookups.accounts, ["clearing"], form.fromCurrency), target_clearing_account_id: firstId(lookups.accounts, ["clearing"], form.baseCurrency), fx_gain_loss_account_id: firstId(lookups.accounts, ["fx_gain_loss"], form.baseCurrency), fx_charge_account_id: form.fxCharge !== "0" ? asId(form.chargeAccount) : undefined, from_amount: form.fromAmount, to_amount: form.toAmount, from_currency: form.fromCurrency, to_currency: form.toCurrency, base_currency: form.baseCurrency, costing_method: form.costingMethod, fx_charge: form.fxCharge || "0", description: form.description || undefined });
+    submit({
+      transaction_date: new Date().toISOString().slice(0, 10),
+      created_by_user_id: defaultUserId(lookups.users),
+      settlement_id: autoSettlementId(lookups.settlements),
+      from_account_id: fromWallet?.id,
+      to_account_id: toWallet?.id,
+      source_clearing_account_id: firstId(lookups.accounts, ["clearing"], form.fromCurrency),
+      target_clearing_account_id: firstId(lookups.accounts, ["clearing"], form.toCurrency),
+      fx_gain_loss_account_id: firstId(lookups.accounts, ["fx_gain_loss"], form.toCurrency),
+      fx_charge_account_id: form.fxCharge !== "0" ? asId(form.chargeAccount) : undefined,
+      from_amount: form.fromAmount,
+      to_amount: form.toAmount,
+      from_currency: form.fromCurrency,
+      to_currency: form.toCurrency,
+      base_currency: form.toCurrency,
+      costing_method: "fifo",
+      fx_charge: form.fxCharge || "0",
+      description: form.reference || undefined
+    });
   }
+
   return (
     <form className="entry-form voucher-form" onSubmit={onSubmit}>
-      {partySelect(lookups.parties, form.party, (party) => {
-        const selectedPartyValue = findParty(lookups.parties, party);
-        const from = partyWallet(lookups.accounts, selectedPartyValue, form.fromCurrency)?.id;
-        const to = partyWallet(lookups.accounts, selectedPartyValue, form.toCurrency)?.id;
-        setForm({ ...form, party, from: from ? String(from) : "", to: to ? String(to) : "" });
-      }, true)}
-      {currencySelect(lookups.currencies, form.fromCurrency, (fromCurrency) => {
-        const from = partyWallet(lookups.accounts, selectedParty, fromCurrency)?.id;
-        setForm({ ...form, fromCurrency, from: from ? String(from) : "" });
-      }, "From Currency")}
-      {currencySelect(lookups.currencies, form.toCurrency, (toCurrency) => {
-        const to = partyWallet(lookups.accounts, selectedParty, toCurrency)?.id;
-        setForm({ ...form, toCurrency, baseCurrency: toCurrency, to: to ? String(to) : "" });
-      }, "To Currency")}
-      <div className="calculation-card"><strong>From Wallet</strong><span>{fromWallet ? accountLabel(fromWallet) : "Missing"}</span></div>
-      <div className="calculation-card"><strong>To Wallet</strong><span>{toWallet ? accountLabel(toWallet) : "Missing"}</span></div>
-      {!fromWallet && <MissingWalletNotice party={selectedParty} currency={form.fromCurrency} onCreate={() => quickCreateWallet(form.fromCurrency, "from")} busy={walletBusy === "from"} />}
-      {!toWallet && <MissingWalletNotice party={selectedParty} currency={form.toCurrency} onCreate={() => quickCreateWallet(form.toCurrency, "to")} busy={walletBusy === "to"} />}
-      {settlementSelect(lookups.settlements, form.settlement, (settlement) => setForm({ ...form, settlement }))}
-      <label><span>From Amount</span><input required value={form.fromAmount} onChange={(event) => setForm({ ...form, fromAmount: event.target.value })} /></label>
-      <label><span>To Amount</span><input required value={form.toAmount} onChange={(event) => setForm({ ...form, toAmount: event.target.value })} /></label>
-      <div className="calculation-card"><span>Actual Rate {actualRate ? actualRate.toFixed(6) : "0.000000"}</span><span>Backend preview will show gain/loss.</span></div>
+      {partySelect(lookups.parties, form.party, (party) => setForm({ ...form, party }), true, "Client")}
+      {currencySelect(lookups.currencies, form.fromCurrency, (fromCurrency) => setForm({ ...form, fromCurrency }), "From")}
+      {currencySelect(lookups.currencies, form.toCurrency, (toCurrency) => setForm({ ...form, toCurrency }), "To")}
+      <div className="calculation-card"><strong>From</strong><span>{fromWallet ? accountLabel(fromWallet) : "Missing Client Balance"}</span></div>
+      <div className="calculation-card"><strong>To</strong><span>{toWallet ? accountLabel(toWallet) : "Missing Client Balance"}</span></div>
+      {!fromWallet && <MissingBalanceNotice party={selectedParty} currency={form.fromCurrency} onCreate={() => quickCreateBalance(form.fromCurrency, "from")} busy={walletBusy === "from"} />}
+      {!toWallet && <MissingBalanceNotice party={selectedParty} currency={form.toCurrency} onCreate={() => quickCreateBalance(form.toCurrency, "to")} busy={walletBusy === "to"} />}
+      <label><span>Given Amount</span><input required value={form.fromAmount} onChange={(event) => setForm({ ...form, fromAmount: event.target.value })} /></label>
+      <label><span>Received Amount</span><input required value={form.toAmount} onChange={(event) => setForm({ ...form, toAmount: event.target.value })} /></label>
+      <div className="calculation-card"><span>Exchange Rate {actualRate ? actualRate.toFixed(6) : "0.000000"}</span><span>Exchange Difference appears after preview.</span></div>
+      <label><span>Reference</span><input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></label>
       {advancedBlock(
         <>
-          <label><span>Base Currency</span><input value={form.baseCurrency} onChange={(event) => setForm({ ...form, baseCurrency: event.target.value.toUpperCase() })} /></label>
-          <label><span>Costing Method</span><select value={form.costingMethod} onChange={(event) => setForm({ ...form, costingMethod: event.target.value })}><option value="fifo">FIFO</option><option value="transaction_wise">Transaction-wise</option></select></label>
-          <label><span>FX Charge</span><input value={form.fxCharge} onChange={(event) => setForm({ ...form, fxCharge: event.target.value })} /></label>
-          {accountSelect(lookups.accounts, form.chargeAccount, (chargeAccount) => setForm({ ...form, chargeAccount }), "FX Charge Ledger", ["expense", "bank_charge_expense"], form.baseCurrency, false)}
+          <label><span>Exchange Fee</span><input value={form.fxCharge} onChange={(event) => setForm({ ...form, fxCharge: event.target.value })} /></label>
+          {accountSelect(lookups.accounts, form.chargeAccount, (chargeAccount) => setForm({ ...form, chargeAccount }), "Fee Type", ["expense", "bank_charge_expense"], form.toCurrency, false)}
         </>
       )}
-      <button type="submit" disabled={busy || !canPreview}>Preview FX Conversion</button>
+      <button type="submit" disabled={busy || !canPreview}>Preview</button>
     </form>
   );
 }
 
 function OpeningBalanceVoucher({ lookups, submit, busy }: VoucherProps) {
-  const [form, setForm] = useState({ account: "", equity: "", currency: "USD", amount: "", baseCurrency: "USD", exchangeRate: "" });
+  const [form, setForm] = useState({ account: "", equity: "", currency: "USD", amount: "", exchangeRate: "" });
+
   function onSubmit(event: FormEvent) {
     event.preventDefault();
-    submit({ transaction_date: new Date().toISOString().slice(0, 10), created_by_user_id: defaultUserId(lookups.users), account_id: asId(form.account), equity_account_id: asId(form.equity), amount: form.amount, currency: form.currency, base_currency: form.baseCurrency || undefined, original_rate: form.exchangeRate || undefined });
+    submit({
+      transaction_date: new Date().toISOString().slice(0, 10),
+      created_by_user_id: defaultUserId(lookups.users),
+      account_id: asId(form.account),
+      equity_account_id: asId(form.equity),
+      amount: form.amount,
+      currency: form.currency,
+      base_currency: DEFAULT_BASE_CURRENCY,
+      original_rate: form.exchangeRate || undefined
+    });
   }
+
   return (
     <form className="entry-form voucher-form" onSubmit={onSubmit}>
       {accountSelect(lookups.accounts, form.account, (account) => {
         const selected = findAccount(lookups.accounts, account);
         setForm({ ...form, account, currency: selected?.currency ?? form.currency });
-      }, "Opening Account", ["cash", "bank", "customer_wallet", "agent_wallet", "fx_dealer_wallet", "commission_income", "commission_payable", "expense", "bank_charge_expense", "fx_gain_loss", "clearing", "suspense"], form.currency)}
-      {accountSelect(lookups.accounts, form.equity, (equity) => setForm({ ...form, equity }), "Equity Ledger", ["owner_equity"], form.currency)}
-      {currencySelect(lookups.currencies, form.currency, (currency) => setForm({ ...form, currency }))}
+      }, "Balance For", ["cash", "bank", "customer_wallet", "agent_wallet", "fx_dealer_wallet", "commission_income", "commission_payable", "expense", "bank_charge_expense", "fx_gain_loss", "clearing", "suspense"])}
+      {accountSelect(lookups.accounts, form.equity, (equity) => setForm({ ...form, equity }), "Funding Source", ["owner_equity"], form.currency)}
       <label><span>Amount</span><input required value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
-      {advancedBlock(
+      {form.currency !== DEFAULT_BASE_CURRENCY && advancedBlock(
         <>
-          <label><span>Base Currency</span><input value={form.baseCurrency} onChange={(event) => setForm({ ...form, baseCurrency: event.target.value.toUpperCase() })} /></label>
           <label><span>Exchange Rate</span><input value={form.exchangeRate} onChange={(event) => setForm({ ...form, exchangeRate: event.target.value })} /></label>
         </>
       )}
-      <button type="submit" disabled={busy}>Preview Opening Balance</button>
+      <button type="submit" disabled={busy}>Preview</button>
     </form>
   );
 }
@@ -536,7 +696,6 @@ function VoucherForm(props: VoucherProps) {
 }
 
 export default function TransactionEntryPage({ routeKey }: { routeKey: TransactionRouteKey }) {
-  const config = transactionRoutes[routeKey];
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [lastPayload, setLastPayload] = useState<ApiRecord | null>(null);
   const [result, setResult] = useState<ApiRecord | null>(null);
@@ -584,19 +743,28 @@ export default function TransactionEntryPage({ routeKey }: { routeKey: Transacti
     }
   }
 
+  function onShortcut(event: KeyboardEvent<HTMLElement>) {
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && preview && !busy) {
+      event.preventDefault();
+      void postTransaction();
+    }
+  }
+
+  const title = routeTitles[routeKey];
+
   return (
-    <section>
+    <section onKeyDown={onShortcut}>
       <header className="page-header">
-        <div><h1>{config.label}</h1><p>{routeHelp[routeKey]} Preview is generated by the backend before posting.</p></div>
+        <div><h1>{title}</h1><p>{routeHelp[routeKey]}</p></div>
       </header>
       <div className="tabs">
-        {Object.entries(transactionRoutes).map(([key, route]) => <NavLink key={key} to={`/transactions/${key}`}>{route.label}</NavLink>)}
+        {Object.entries(transactionRoutes).map(([key]) => <NavLink key={key} to={`/transactions/${key}`}>{routeTitles[key as TransactionRouteKey]}</NavLink>)}
       </div>
-      {loading && <LoadingState label="Loading voucher lists" />}
+      {loading && <LoadingState label="Loading entry lists" />}
       {lookups && <VoucherForm lookups={lookups} routeKey={routeKey} submit={previewTransaction} refreshLookups={reload} busy={busy} />}
       {error && <ErrorState message={error} />}
-      {result && <div className="state-block success">Posted transaction {String(result.transaction_no)}.</div>}
-      {preview && <PreviewPanel preview={preview} onPost={postTransaction} posting={busy} />}
+      {result && <div className="state-block success">{title} posted successfully<br /><strong>{String(result.transaction_no)}</strong></div>}
+      {preview && <PreviewPanel preview={preview} payload={lastPayload} routeKey={routeKey} onPost={postTransaction} posting={busy} />}
     </section>
   );
 }

@@ -56,23 +56,35 @@ if (!appSource.includes("app-shell") || !appSource.includes("sidebar") || !appSo
 if (!dashboardSource.includes("<h1>Dashboard</h1>")) {
   throw new Error("Missing dashboard header");
 }
-for (const forbidden of ["User ID", "Receiving Account ID", "Clearing Account ID"]) {
+for (const forbidden of ["User ID", "Receiving Account ID", "Clearing Account ID", "<span>Settlement</span>", "Party wallet", "Ledger entries", "Balance effects", "Base Currency", "Costing Method", "FX Charge Ledger"]) {
   if (transactionSource.includes(forbidden)) {
     throw new Error(`Transaction UI exposes internal label: ${forbidden}`);
   }
 }
-for (const required of ["Party", "Receive In", "Settlement", "Currency", "Amount Mode", "Amount", "Commission Type", "Commission Value"]) {
+for (const required of ["Receive Money", "Client", "Receive In", "Amount Type", "Net Received", "Gross Received", "Amount", "Commission", "Commission Value", "Reference"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Receipt voucher missing ${required}`);
   }
 }
-for (const required of ["No {currency} wallet exists", "Create Wallet", "createPartyWallet", "partyWallet", "api.currencies()"]) {
+for (const required of ["Pay Money", "Net Sent", "Gross Sent", "Charges/Commission", "Currency Exchange", "Given Amount", "Received Amount", "Exchange Rate", "Exchange Difference"]) {
   if (!transactionSource.includes(required)) {
-    throw new Error(`Wallet-aware voucher logic missing ${required}`);
+    throw new Error(`Compressed operator workflow missing ${required}`);
   }
 }
-if (!transactionSource.includes("api.previewTransaction(routeKey, payload)") || !transactionSource.includes("api.postTransaction(routeKey, lastPayload)")) {
-  throw new Error("Voucher flow must call backend preview before post");
+for (const required of ['data-searchable="true"', "onKeyDown", "ctrlKey", "metaKey", "api.previewTransaction(routeKey, payload)", "api.postTransaction(routeKey, lastPayload)"]) {
+  if (!transactionSource.includes(required)) {
+    throw new Error(`Voucher workflow behavior missing ${required}`);
+  }
+}
+for (const required of ["No {currency} Client Balance exists", "Create Client Balance", "createPartyWallet", "partyWallet", "api.currencies()"]) {
+  if (!transactionSource.includes(required)) {
+    throw new Error(`Client balance voucher logic missing ${required}`);
+  }
+}
+for (const required of ["Cash Balances", "Bank Balances", "Today's Receipts", "Today's Payments", "Open Work", "Exchange Difference Today"]) {
+  if (!dashboardSource.includes(required)) {
+    throw new Error(`Operational dashboard missing ${required}`);
+  }
 }
 if (!envExampleSource.includes("VITE_API_BASE_URL=http://127.0.0.1:8000")) {
   throw new Error("Missing clear backend API base URL setting");

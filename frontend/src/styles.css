@@ -19,6 +19,10 @@ select {
   font: inherit;
 }
 
+label[data-searchable="true"] input {
+  width: 100%;
+}
+
 button {
   border: 1px solid #1f6b63;
   background: #1f6b63;
@@ -330,7 +334,8 @@ th {
 }
 
 .summary-strip,
-.helper-grid {
+.helper-grid,
+.operator-preview {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
@@ -338,11 +343,31 @@ th {
 }
 
 .summary-strip span,
+.operator-preview div,
 details {
   background: white;
   border: 1px solid #d8e0e8;
   border-radius: 8px;
   padding: 10px 12px;
+}
+
+.operator-preview div {
+  min-width: 210px;
+}
+
+.operator-preview span,
+.operator-preview strong {
+  display: block;
+}
+
+.operator-preview span {
+  color: #5d6875;
+  font-size: 13px;
+}
+
+.operator-preview strong {
+  margin-top: 4px;
+  font-size: 18px;
 }
 
 details {
