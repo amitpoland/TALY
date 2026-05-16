@@ -272,8 +272,8 @@ function PreviewPanel({
     );
   } else if (routeKey === "payment") {
     summaryRows.push(
-      { label: "You are paying", value: amountWithCurrency(payload?.amount) },
-      { label: "Client balance reduced", value: amountWithCurrency(payload?.amount) }
+      { label: "Money paid from cash/bank", value: amountWithCurrency(payload?.amount) },
+      { label: "Client/vendor balance affected", value: amountWithCurrency(payload?.amount) }
     );
   } else if (routeKey === "fxConversion") {
     const fxDifference = component("fx_gain") ?? component("fx_loss");
@@ -451,18 +451,14 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
 }
 
 function PaymentVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
-  const [form, setForm] = useState({ party: "", payFrom: "", currency: "USD", amountMode: "net", amount: "", chargeType: "none", chargeValue: "", reference: "" });
+  const [form, setForm] = useState({ party: "", payFrom: "", currency: "USD", amount: "", reference: "" });
   const selectedParty = findParty(lookups.parties, form.party);
   const payAccount = findAccount(lookups.accounts, form.payFrom);
   const currency = payAccount?.currency ?? form.currency;
   const clientBalance = partyWallet(lookups.accounts, selectedParty, currency);
   const [walletBusy, setWalletBusy] = useState(false);
   const amount = decimal(form.amount);
-  const chargeValue = decimal(form.chargeValue);
-  const charges = form.chargeType === "percentage" ? amount * chargeValue / 100 : form.chargeType === "fixed" ? chargeValue : 0;
-  const netSent = form.amountMode === "net" ? amount : Math.max(amount - charges, 0);
-  const grossSent = form.amountMode === "gross" ? amount : amount + charges;
-  const canPreview = Boolean(clientBalance && payAccount && grossSent > 0);
+  const canPreview = Boolean(clientBalance && payAccount && amount > 0);
 
   async function quickCreateBalance() {
     if (!selectedParty) return;
@@ -484,7 +480,7 @@ function PaymentVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
       settlement_id: autoSettlementId(lookups.settlements),
       paying_account_id: asId(form.payFrom),
       clearing_account_id: clientBalance?.id,
-      amount: money(netSent),
+      amount: money(amount),
       currency,
       description: form.reference || undefined
     });
@@ -497,16 +493,12 @@ function PaymentVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
         const selected = findAccount(lookups.accounts, payFrom);
         setForm({ ...form, payFrom, currency: selected?.currency ?? form.currency });
       }, "Pay From", ["cash", "bank"])}
-      <label><span>Amount Type</span><select value={form.amountMode} onChange={(event) => setForm({ ...form, amountMode: event.target.value })}><option value="net">Net Sent</option><option value="gross">Gross Sent</option></select></label>
       <label><span>Amount</span><input required value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
-      <label><span>Charges/Commission</span><select value={form.chargeType} onChange={(event) => setForm({ ...form, chargeType: event.target.value })}><option value="none">none</option><option value="percentage">%</option><option value="fixed">fixed</option></select></label>
-      <label><span>Charges Value</span><input value={form.chargeValue} onChange={(event) => setForm({ ...form, chargeValue: event.target.value })} /></label>
       <label><span>Reference</span><input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></label>
       <div className="calculation-card">
         <strong>Quick Check</strong>
-        <span>You are paying {money(netSent)} {currency}</span>
-        <span>Charges shown {money(charges)} {currency}</span>
-        <span>Total cash/bank impact {money(grossSent)} {currency}</span>
+        <span>Money paid from cash/bank {money(amount)} {currency}</span>
+        <span>Client/vendor balance affected {money(amount)} {currency}</span>
         <span>Client Balance {clientBalance ? accountLabel(clientBalance) : "Missing"}</span>
       </div>
       {!clientBalance && <MissingBalanceNotice party={selectedParty} currency={currency} onCreate={quickCreateBalance} busy={walletBusy} />}

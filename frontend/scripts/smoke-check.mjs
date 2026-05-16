@@ -66,7 +66,12 @@ for (const required of ["Receive Money", "Client", "Receive In", "Amount Type", 
     throw new Error(`Receipt voucher missing ${required}`);
   }
 }
-for (const required of ["Pay Money", "Net Sent", "Gross Sent", "Charges/Commission", "Currency Exchange", "Given Amount", "Received Amount", "Exchange Rate", "Exchange Difference"]) {
+for (const forbidden of ["Charges/Commission", "Charges Value", "Charges shown", "Total cash/bank impact", "Net Sent", "Gross Sent"]) {
+  if (transactionSource.includes(forbidden)) {
+    throw new Error(`Payment UI still suggests unsupported charge posting: ${forbidden}`);
+  }
+}
+for (const required of ["Pay Money", "Money paid from cash/bank", "Client/vendor balance affected", "Currency Exchange", "Given Amount", "Received Amount", "Exchange Rate", "Exchange Difference"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Compressed operator workflow missing ${required}`);
   }
