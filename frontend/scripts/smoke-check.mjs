@@ -74,6 +74,11 @@ for (const required of ["Cash / Bank Entry", "Cash/Bank", "Entry Type", "Party",
     throw new Error(`Receipt voucher missing ${required}`);
   }
 }
+for (const required of ["receiptAmounts", "amount / (1 + rate)", "amount - principal"]) {
+  if (!transactionSource.includes(required)) {
+    throw new Error(`Receipt commission reverse calculation missing ${required}`);
+  }
+}
 for (const required of ["ensureCommissionIncomeAccount", "COMMISSION-${currency}", "commission_income", "commission_income_account_id: commissionAccountId"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Receipt commission auto-account setup missing ${required}`);

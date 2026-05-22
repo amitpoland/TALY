@@ -99,6 +99,24 @@ function money(value: number): string {
   return value.toFixed(2);
 }
 
+function receiptAmounts(amount: number, amountMode: string, commissionType: string, commissionValue: number) {
+  if (commissionType === "percentage") {
+    const rate = commissionValue / 100;
+    if (amountMode === "gross") {
+      const principal = rate > -1 ? amount / (1 + rate) : 0;
+      return { gross: amount, principal, commission: amount - principal };
+    }
+    const commission = amount * rate;
+    return { gross: amount + commission, principal: amount, commission };
+  }
+  const commission = commissionType === "fixed" ? commissionValue : 0;
+  return {
+    gross: amountMode === "gross" ? amount : amount + commission,
+    principal: amountMode === "gross" ? amount - commission : amount,
+    commission
+  };
+}
+
 function accountBalance(account?: Account): number {
   const balance = Number(String(account?.current_balance ?? "0").replace(",", "."));
   return Number.isFinite(balance) ? balance : 0;
@@ -436,9 +454,7 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
   const selectedParty = findParty(lookups.parties, form.party);
   const commissionValue = decimal(form.commissionValue);
   const amount = decimal(form.amount);
-  const commission = form.commissionType === "percentage" ? amount * commissionValue / 100 : form.commissionType === "fixed" ? commissionValue : 0;
-  const gross = form.amountMode === "gross" ? amount : amount + commission;
-  const principal = form.amountMode === "gross" ? amount - commission : amount;
+  const { gross, principal, commission } = receiptAmounts(amount, form.amountMode, form.commissionType, commissionValue);
   const clientBalance = partyWallet(lookups.accounts, selectedParty, currency);
   const canPreview = Boolean(clientBalance && receiveAccount && principal >= 0 && gross > 0);
 
@@ -601,9 +617,8 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
   const amount = decimal(form.amount);
   const commissionValue = decimal(form.commissionValue);
   const isReceipt = form.entryType === "receipt";
-  const commission = isReceipt && form.commissionType === "percentage" ? amount * commissionValue / 100 : isReceipt && form.commissionType === "fixed" ? commissionValue : 0;
-  const gross = form.amountMode === "gross" ? amount : amount + commission;
-  const principal = form.amountMode === "gross" ? amount - commission : amount;
+  const receipt = isReceipt ? receiptAmounts(amount, form.amountMode, form.commissionType, commissionValue) : { gross: amount, principal: amount, commission: 0 };
+  const { gross, principal, commission } = receipt;
   const cashWarning = !isReceipt ? cashShortageMessage(cashBankAccount, amount) : null;
   const canPreview = Boolean(cashBankAccount && clientBalance && amount > 0 && principal >= 0 && !cashWarning);
 
