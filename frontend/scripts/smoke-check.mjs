@@ -69,7 +69,7 @@ for (const forbidden of ["User ID", "Receiving Account ID", "Clearing Account ID
     throw new Error(`Transaction UI exposes internal label: ${forbidden}`);
   }
 }
-for (const required of ["Cash / Bank Entry", "Cash/Bank", "Entry Type", "Party", "Receipt", "Payment", "Delete Draft", "client-currency-strip", "Receive Money", "Client", "Receive In", "Amount Type", "Net Received", "Gross Received", "Amount", "Commission", "Commission Value", "Reference"]) {
+for (const required of ["Cash / Bank Entry", "Cash/Bank", "Entry Type", "Party", "Receipt", "Payment", "Delete Draft", "client-currency-strip", "Receive Money", "Client", "Receive In", "Amount Type", "Net Received", "Gross Received", "Amount", "Commission", "Commission Value", "Reference", "Preview Voucher", "previewBlockedReason"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Receipt voucher missing ${required}`);
   }

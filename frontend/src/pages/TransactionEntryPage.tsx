@@ -620,7 +620,18 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
   const receipt = isReceipt ? receiptAmounts(amount, form.amountMode, form.commissionType, commissionValue) : { gross: amount, principal: amount, commission: 0 };
   const { gross, principal, commission } = receipt;
   const cashWarning = !isReceipt ? cashShortageMessage(cashBankAccount, amount) : null;
-  const canPreview = Boolean(cashBankAccount && clientBalance && amount > 0 && principal >= 0 && !cashWarning);
+  const previewBlockedReason = !cashBankAccount
+    ? "Select Cash/Bank."
+    : !selectedParty
+      ? "Select Party."
+      : !clientBalance
+        ? `Create ${currency} Client Balance for ${selectedParty.name}.`
+        : amount <= 0
+          ? "Enter Amount."
+          : principal < 0
+            ? "Commission cannot be more than amount."
+            : cashWarning;
+  const canPreview = !previewBlockedReason;
 
   function updateForm(next: Partial<typeof emptyCashBankEntryForm>) {
     setForm((current) => ({ ...current, ...next }));
@@ -713,9 +724,10 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
       {cashWarning && <p className="form-note danger-note">{cashWarning}</p>}
       {!clientBalance && <MissingBalanceNotice party={selectedParty} currency={currency} onCreate={quickCreateBalance} busy={walletBusy} />}
       <div className="voucher-action-row">
-        <button type="submit" disabled={busy || !canPreview}>Preview</button>
+        <button type="submit" className="primary-action" disabled={busy || !canPreview}>Preview Voucher</button>
         <button type="button" className="secondary-action" onClick={resetPreview}>Edit</button>
         <button type="button" className="danger-action" onClick={deleteDraft}>Delete Draft</button>
+        {!canPreview && <span className="action-hint">{previewBlockedReason}</span>}
       </div>
     </form>
   );

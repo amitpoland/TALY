@@ -331,15 +331,33 @@ kbd {
 }
 
 .voucher-action-row {
+  position: sticky;
+  bottom: 0;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+  margin: 2px -10px -10px;
+  padding: 10px;
+  border-top: 1px solid #d8e0e8;
+  background: white;
+  box-shadow: 0 -8px 18px rgba(18, 27, 38, 0.06);
 }
 
 .voucher-action-row button {
   min-height: 34px;
   padding: 7px 14px;
+}
+
+.primary-action {
+  min-width: 132px;
+  font-weight: 800;
+}
+
+.action-hint {
+  color: #8a2f27;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .secondary-action {
