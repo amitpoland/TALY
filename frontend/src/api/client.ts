@@ -72,6 +72,7 @@ function query(params: Record<string, string | number | undefined | null>): stri
 }
 
 export const transactionRoutes = {
+  cashBankEntry: { label: "Cash / Bank Entry", preview: "/transactions/receipt/preview", post: "/transactions/receipt/post" },
   openingBalance: { label: "Opening Balance", preview: "/transactions/opening-balance/preview", post: "/transactions/opening-balance/post" },
   receipt: { label: "Receipt", preview: "/transactions/receipt/preview", post: "/transactions/receipt/post" },
   payment: { label: "Payment", preview: "/transactions/payment/preview", post: "/transactions/payment/post" },

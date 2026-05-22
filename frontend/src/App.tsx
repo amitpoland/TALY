@@ -12,6 +12,7 @@ import TransactionEntryPage from "./pages/TransactionEntryPage";
 import { reportRoutes, transactionRoutes } from "./api/client";
 
 const voucherLinks = [
+  ["Cash / Bank Entry", "/transactions/cashBankEntry", "Alt+C"],
   ["Receive Money", "/transactions/receipt", "Alt+R"],
   ["Pay Money", "/transactions/payment", "Alt+P"],
   ["Cash Handover", "/transactions/cashHandover", ""],
@@ -40,6 +41,7 @@ const navGroups = [
 ];
 
 const shortcutRoutes: Record<string, string> = {
+  c: "/transactions/cashBankEntry",
   r: "/transactions/receipt",
   p: "/transactions/payment",
   e: "/transactions/expense",

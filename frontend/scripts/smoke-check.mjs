@@ -53,7 +53,7 @@ if (!mainSource.includes("ReactDOM.createRoot") || !mainSource.includes("AppErro
 if (!appSource.includes("app-shell") || !appSource.includes("sidebar") || !appSource.includes("Dashboard")) {
   throw new Error("Missing visible application shell");
 }
-for (const required of ["navGroups", "Masters", "Vouchers", "System", "CommandPalette", "Search voucher, report, party, account", "Alt+R", "Alt+P", "Alt+E", "Alt+X"]) {
+for (const required of ["navGroups", "Masters", "Vouchers", "System", "CommandPalette", "Search voucher, report, party, account", "Alt+C", "Alt+R", "Alt+P", "Alt+E", "Alt+X"]) {
   if (!appSource.includes(required)) {
     throw new Error(`Tally-style operator shell missing ${required}`);
   }
@@ -66,7 +66,7 @@ for (const forbidden of ["User ID", "Receiving Account ID", "Clearing Account ID
     throw new Error(`Transaction UI exposes internal label: ${forbidden}`);
   }
 }
-for (const required of ["Receive Money", "Client", "Receive In", "Amount Type", "Net Received", "Gross Received", "Amount", "Commission", "Commission Value", "Reference"]) {
+for (const required of ["Cash / Bank Entry", "Cash/Bank", "Entry Type", "Party", "Receipt", "Payment", "Receive Money", "Client", "Receive In", "Amount Type", "Net Received", "Gross Received", "Amount", "Commission", "Commission Value", "Reference"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Receipt voucher missing ${required}`);
   }
@@ -81,7 +81,7 @@ for (const required of ["Pay Money", "Money paid from cash/bank", "Client/vendor
     throw new Error(`Compressed operator workflow missing ${required}`);
   }
 }
-for (const required of ['data-searchable="true"', "onKeyDown", "ctrlKey", "metaKey", "api.previewTransaction(routeKey, payload)", "api.postTransaction(routeKey, lastPayload)"]) {
+for (const required of ['data-searchable="true"', "onKeyDown", "ctrlKey", "metaKey", "api.previewTransaction(targetRoute, cleanPayload)", "api.postTransaction(targetRoute, cleanPayload)"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Voucher workflow behavior missing ${required}`);
   }

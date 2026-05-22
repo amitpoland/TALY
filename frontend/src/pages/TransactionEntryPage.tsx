@@ -55,6 +55,7 @@ type SearchOption = {
 const DEFAULT_BASE_CURRENCY = "USD";
 
 const routeTitles: Record<TransactionRouteKey, string> = {
+  cashBankEntry: "Cash / Bank Entry",
   openingBalance: "Opening Balance",
   receipt: "Receive Money",
   payment: "Pay Money",
@@ -65,6 +66,7 @@ const routeTitles: Record<TransactionRouteKey, string> = {
 };
 
 const routeHelp: Record<TransactionRouteKey, string> = {
+  cashBankEntry: "Select cash or bank first, then party and amount.",
   openingBalance: "Set the starting amount for a cash, bank, or client balance.",
   receipt: "Record money received. The system prepares the accounting preview before posting.",
   payment: "Record money paid out. The system prepares the accounting preview before posting.",
@@ -75,6 +77,7 @@ const routeHelp: Record<TransactionRouteKey, string> = {
 };
 
 const routeShortcut: Partial<Record<TransactionRouteKey, string>> = {
+  cashBankEntry: "Alt+C",
   receipt: "Alt+R",
   payment: "Alt+P",
   expense: "Alt+E",
@@ -276,18 +279,20 @@ function PreviewPanel({
   const amountWithCurrency = (value: unknown, fallbackCurrency = currency) => `${value ?? "0.00"} ${fallbackCurrency}`;
   const summaryRows: { label: string; value: string }[] = [];
 
-  if (routeKey === "receipt") {
+  const previewRouteKey = String(payload?.__routeKey ?? routeKey);
+
+  if (previewRouteKey === "receipt") {
     summaryRows.push(
       { label: "You are receiving", value: amountWithCurrency(payload?.gross_amount) },
       { label: "Client credited", value: amountWithCurrency(payload?.principal_amount) },
       { label: "Commission earned", value: amountWithCurrency(payload?.commission_amount) }
     );
-  } else if (routeKey === "payment") {
+  } else if (previewRouteKey === "payment") {
     summaryRows.push(
       { label: "Money paid from cash/bank", value: amountWithCurrency(payload?.amount) },
       { label: "Client/vendor balance affected", value: amountWithCurrency(payload?.amount) }
     );
-  } else if (routeKey === "fxConversion") {
+  } else if (previewRouteKey === "fxConversion") {
     const fxDifference = component("fx_gain") ?? component("fx_loss");
     summaryRows.push(
       { label: "Given amount", value: amountWithCurrency(payload?.from_amount, String(payload?.from_currency ?? "")) },
@@ -517,6 +522,100 @@ function PaymentVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
   );
 }
 
+function CashBankEntryVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
+  const [form, setForm] = useState({
+    entryType: "receipt",
+    cashBank: "",
+    party: "",
+    currency: "USD",
+    amount: "",
+    amountMode: "net",
+    commissionType: "none",
+    commissionValue: "",
+    reference: ""
+  });
+  const [walletBusy, setWalletBusy] = useState(false);
+  const cashBankAccount = findAccount(lookups.accounts, form.cashBank);
+  const currency = cashBankAccount?.currency ?? form.currency;
+  const selectedParty = findParty(lookups.parties, form.party);
+  const clientBalance = partyWallet(lookups.accounts, selectedParty, currency);
+  const amount = decimal(form.amount);
+  const commissionValue = decimal(form.commissionValue);
+  const isReceipt = form.entryType === "receipt";
+  const commission = isReceipt && form.commissionType === "percentage" ? amount * commissionValue / 100 : isReceipt && form.commissionType === "fixed" ? commissionValue : 0;
+  const gross = form.amountMode === "gross" ? amount : amount + commission;
+  const principal = form.amountMode === "gross" ? amount - commission : amount;
+  const commissionAccount = lookups.accounts.find((account) => account.account_type === "commission_income" && account.currency === currency);
+  const canPreview = Boolean(cashBankAccount && clientBalance && amount > 0 && principal >= 0);
+
+  async function quickCreateBalance() {
+    if (!selectedParty) return;
+    setWalletBusy(true);
+    try {
+      await createPartyWallet(selectedParty, currency);
+      refreshLookups();
+    } finally {
+      setWalletBusy(false);
+    }
+  }
+
+  function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (!canPreview) return;
+    const common = {
+      transaction_date: new Date().toISOString().slice(0, 10),
+      created_by_user_id: defaultUserId(lookups.users),
+      settlement_id: autoSettlementId(lookups.settlements),
+      clearing_account_id: clientBalance?.id,
+      currency,
+      description: form.reference || undefined
+    };
+    if (isReceipt) {
+      submit({
+        ...common,
+        __routeKey: "receipt",
+        receiving_account_id: asId(form.cashBank),
+        gross_amount: money(gross),
+        principal_amount: money(principal),
+        commission_amount: money(commission),
+        commission_income_account_id: commission > 0 ? commissionAccount?.id : undefined,
+        base_currency: DEFAULT_BASE_CURRENCY
+      });
+      return;
+    }
+    submit({
+      ...common,
+      __routeKey: "payment",
+      paying_account_id: asId(form.cashBank),
+      amount: money(amount)
+    });
+  }
+
+  return (
+    <form className="entry-form voucher-form cash-bank-entry-form" onSubmit={onSubmit}>
+      {accountSelect(lookups.accounts, form.cashBank, (cashBank) => {
+        const selected = findAccount(lookups.accounts, cashBank);
+        setForm({ ...form, cashBank, currency: selected?.currency ?? form.currency });
+      }, "Cash/Bank", ["cash", "bank"])}
+      <label><span>Entry Type</span><select value={form.entryType} onChange={(event) => setForm({ ...form, entryType: event.target.value })}><option value="receipt">Receipt</option><option value="payment">Payment</option></select></label>
+      {partySelect(lookups.parties, form.party, (party) => setForm({ ...form, party }), true, "Party")}
+      <label><span>Date</span><input type="date" value={new Date().toISOString().slice(0, 10)} readOnly /></label>
+      <label><span>Amount</span><input required value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
+      {isReceipt && <label><span>Amount Type</span><select value={form.amountMode} onChange={(event) => setForm({ ...form, amountMode: event.target.value })}><option value="net">Net Received</option><option value="gross">Gross Received</option></select></label>}
+      {isReceipt && <label><span>Commission</span><select value={form.commissionType} onChange={(event) => setForm({ ...form, commissionType: event.target.value })}><option value="none">none</option><option value="percentage">%</option><option value="fixed">fixed</option></select></label>}
+      {isReceipt && <label><span>Commission Value</span><input value={form.commissionValue} onChange={(event) => setForm({ ...form, commissionValue: event.target.value })} /></label>}
+      <label><span>Reference</span><input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></label>
+      <div className="voucher-plain-summary">
+        <span>{accountLabel(cashBankAccount ?? ({ name: "Cash/Bank", currency } as Account))} {isReceipt ? "+" : "-"}{money(isReceipt ? gross : amount)} {currency}</span>
+        <span>{selectedParty?.name ?? "Party"} balance {isReceipt ? "+" : "-"}{money(isReceipt ? principal : amount)} {currency}</span>
+        {isReceipt && commission > 0 && <span>Commission +{money(commission)} {currency}</span>}
+      </div>
+      {!clientBalance && <MissingBalanceNotice party={selectedParty} currency={currency} onCreate={quickCreateBalance} busy={walletBusy} />}
+      <button type="submit" disabled={busy || !canPreview}>Preview</button>
+    </form>
+  );
+}
+
 function TransferVoucher({ lookups, routeKey, submit, busy }: VoucherProps) {
   const isBank = routeKey === "bankTransfer";
   const accountTypes = isBank ? ["bank"] : ["cash"];
@@ -691,6 +790,7 @@ function VoucherForm(props: VoucherProps) {
   if (!props.lookups.users.some((user) => user.is_active !== false && asId(user.id))) {
     return <ErrorState message="No active local user found. Run seed command." />;
   }
+  if (props.routeKey === "cashBankEntry") return <CashBankEntryVoucher {...props} />;
   if (props.routeKey === "receipt") return <ReceiptVoucher {...props} />;
   if (props.routeKey === "payment") return <PaymentVoucher {...props} />;
   if (props.routeKey === "cashHandover" || props.routeKey === "bankTransfer") return <TransferVoucher {...props} />;
@@ -719,12 +819,14 @@ export default function TransactionEntryPage({ routeKey }: { routeKey: Transacti
   }, [routeKey]);
 
   async function previewTransaction(payload: ApiRecord) {
+    const targetRoute = (payload.__routeKey as TransactionRouteKey | undefined) ?? routeKey;
+    const { __routeKey, ...cleanPayload } = payload;
     setBusy(true);
     setError(null);
     setResult(null);
-    setLastPayload(payload);
+    setLastPayload({ ...cleanPayload, __routeKey: targetRoute });
     try {
-      setPreview(await api.previewTransaction(routeKey, payload));
+      setPreview(await api.previewTransaction(targetRoute, cleanPayload));
     } catch (err) {
       setPreview(null);
       setError((err as Error).message);
@@ -735,10 +837,12 @@ export default function TransactionEntryPage({ routeKey }: { routeKey: Transacti
 
   async function postTransaction() {
     if (!lastPayload) return;
+    const targetRoute = (lastPayload.__routeKey as TransactionRouteKey | undefined) ?? routeKey;
+    const { __routeKey, ...cleanPayload } = lastPayload;
     setBusy(true);
     setError(null);
     try {
-      setResult(await api.postTransaction(routeKey, lastPayload));
+      setResult(await api.postTransaction(targetRoute, cleanPayload));
       setPreview(null);
       setLastPayload(null);
     } catch (err) {
