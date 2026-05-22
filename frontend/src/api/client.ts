@@ -108,6 +108,7 @@ export const api = {
   dashboard: () => request<DashboardResponse>("/reports/dashboard"),
   parties: () => request<ApiRecord[]>("/parties"),
   createParty: (payload: ApiRecord) => request<ApiRecord>("/parties", { method: "POST", body: JSON.stringify(payload) }),
+  updateParty: (id: string | number, payload: ApiRecord) => request<ApiRecord>(`/parties/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   accounts: () => request<ApiRecord[]>("/accounts"),
   createAccount: (payload: ApiRecord) => request<ApiRecord>("/accounts", { method: "POST", body: JSON.stringify(payload) }),
   currencies: () => request<ApiRecord[]>("/currencies"),

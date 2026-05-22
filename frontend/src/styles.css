@@ -354,6 +354,18 @@ kbd {
   color: #8a2f27;
 }
 
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.row-actions button {
+  min-height: 30px;
+  padding: 5px 9px;
+  font-size: 12px;
+}
+
 .voucher-plain-summary {
   display: flex;
   flex-wrap: wrap;
