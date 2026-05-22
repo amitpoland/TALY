@@ -20,7 +20,7 @@ export default function ReportsPage() {
 
   return (
     <section>
-      <header className="page-header"><div><h1>Reports</h1><p>Read-only reports from existing backend report APIs.</p></div></header>
+      <header className="page-header"><div><h1>Reports</h1><p>Read-only day book, ledgers, cash, bank, and profitability views.</p></div></header>
       <div className="tabs">
         {reportRoutes.map((report) => <NavLink key={report.id} to={`/reports/${report.id}`}>{report.label}</NavLink>)}
       </div>

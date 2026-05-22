@@ -85,6 +85,7 @@ export const transactionRoutes = {
 export type TransactionRouteKey = keyof typeof transactionRoutes;
 
 export const reportRoutes = [
+  { id: "day-book", label: "Day Book", path: "/reports/day-book" },
   { id: "cash", label: "Cash", path: "/reports/cash" },
   { id: "bank", label: "Bank", path: "/reports/bank" },
   { id: "customer-ledger", label: "Customer Ledger", path: "/reports/customer-ledger" },

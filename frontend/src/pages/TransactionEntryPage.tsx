@@ -99,6 +99,18 @@ function money(value: number): string {
   return value.toFixed(2);
 }
 
+function accountBalance(account?: Account): number {
+  const balance = Number(String(account?.current_balance ?? "0").replace(",", "."));
+  return Number.isFinite(balance) ? balance : 0;
+}
+
+function cashShortageMessage(account: Account | undefined, amount: number): string | null {
+  if (!account || account.account_type !== "cash" || amount <= 0) return null;
+  const balance = accountBalance(account);
+  if (balance >= amount) return null;
+  return `${accountLabel(account)} has only ${money(balance)} ${account.currency}. Add opening balance or choose Bank.`;
+}
+
 function settlementId(settlement: Settlement): number | undefined {
   return settlement.id ?? settlement.settlement_id;
 }
@@ -512,7 +524,8 @@ function PaymentVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
   const clientBalance = partyWallet(lookups.accounts, selectedParty, currency);
   const [walletBusy, setWalletBusy] = useState(false);
   const amount = decimal(form.amount);
-  const canPreview = Boolean(clientBalance && payAccount && amount > 0);
+  const cashWarning = cashShortageMessage(payAccount, amount);
+  const canPreview = Boolean(clientBalance && payAccount && amount > 0 && !cashWarning);
 
   async function quickCreateBalance() {
     if (!selectedParty) return;
@@ -551,9 +564,11 @@ function PaymentVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
       <label><span>Reference</span><input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></label>
       <div className="voucher-plain-summary">
         <span>Money paid from cash/bank {money(amount)} {currency}</span>
+        {payAccount && <span>Available {money(accountBalance(payAccount))} {currency}</span>}
         <span>Client/vendor balance affected {money(amount)} {currency}</span>
         <span>Client balance {clientBalance ? accountLabel(clientBalance) : "Missing"}</span>
       </div>
+      {cashWarning && <p className="form-note danger-note">{cashWarning}</p>}
       {!clientBalance && <MissingBalanceNotice party={selectedParty} currency={currency} onCreate={quickCreateBalance} busy={walletBusy} />}
       <button type="submit" disabled={busy || !canPreview}>Preview</button>
     </form>
@@ -589,7 +604,8 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
   const commission = isReceipt && form.commissionType === "percentage" ? amount * commissionValue / 100 : isReceipt && form.commissionType === "fixed" ? commissionValue : 0;
   const gross = form.amountMode === "gross" ? amount : amount + commission;
   const principal = form.amountMode === "gross" ? amount - commission : amount;
-  const canPreview = Boolean(cashBankAccount && clientBalance && amount > 0 && principal >= 0);
+  const cashWarning = !isReceipt ? cashShortageMessage(cashBankAccount, amount) : null;
+  const canPreview = Boolean(cashBankAccount && clientBalance && amount > 0 && principal >= 0 && !cashWarning);
 
   function updateForm(next: Partial<typeof emptyCashBankEntryForm>) {
     setForm((current) => ({ ...current, ...next }));
@@ -669,6 +685,7 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
       <label><span>Reference</span><input value={form.reference} onChange={(event) => updateForm({ reference: event.target.value })} /></label>
       <div className="voucher-plain-summary">
         <span>{accountLabel(cashBankAccount ?? ({ name: "Cash/Bank", currency } as Account))} {isReceipt ? "+" : "-"}{money(isReceipt ? gross : amount)} {currency}</span>
+        {cashBankAccount && <span>Available {money(accountBalance(cashBankAccount))} {currency}</span>}
         <span>{selectedParty?.name ?? "Party"} balance {isReceipt ? "+" : "-"}{money(isReceipt ? principal : amount)} {currency}</span>
         {isReceipt && commission > 0 && <span>Commission +{money(commission)} {currency}</span>}
       </div>
@@ -678,6 +695,7 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
         </div>
       )}
       {setupError && <p className="form-note danger-note">{setupError}</p>}
+      {cashWarning && <p className="form-note danger-note">{cashWarning}</p>}
       {!clientBalance && <MissingBalanceNotice party={selectedParty} currency={currency} onCreate={quickCreateBalance} busy={walletBusy} />}
       <div className="voucher-action-row">
         <button type="submit" disabled={busy || !canPreview}>Preview</button>
@@ -692,9 +710,13 @@ function TransferVoucher({ lookups, routeKey, submit, busy }: VoucherProps) {
   const isBank = routeKey === "bankTransfer";
   const accountTypes = isBank ? ["bank"] : ["cash"];
   const [form, setForm] = useState({ from: "", to: "", currency: "USD", amount: "", reference: "" });
+  const fromAccount = findAccount(lookups.accounts, form.from);
+  const amount = decimal(form.amount);
+  const cashWarning = cashShortageMessage(fromAccount, amount);
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
+    if (cashWarning) return;
     submit({
       transaction_date: new Date().toISOString().slice(0, 10),
       created_by_user_id: defaultUserId(lookups.users),
@@ -716,16 +738,22 @@ function TransferVoucher({ lookups, routeKey, submit, busy }: VoucherProps) {
       {accountSelect(lookups.accounts, form.to, (to) => setForm({ ...form, to }), isBank ? "Transfer To" : "Hand Over To", accountTypes, form.currency)}
       <label><span>Amount</span><input required value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
       <label><span>Reference</span><input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></label>
-      <button type="submit" disabled={busy}>Preview</button>
+      {fromAccount && <div className="voucher-plain-summary"><span>Available {money(accountBalance(fromAccount))} {form.currency}</span></div>}
+      {cashWarning && <p className="form-note danger-note">{cashWarning}</p>}
+      <button type="submit" disabled={busy || Boolean(cashWarning)}>Preview</button>
     </form>
   );
 }
 
 function ExpenseVoucher({ lookups, submit, busy }: VoucherProps) {
   const [form, setForm] = useState({ paidFrom: "", expense: "", currency: "USD", amount: "", expenseType: "other", affectsSettlement: false, reference: "" });
+  const paidFromAccount = findAccount(lookups.accounts, form.paidFrom);
+  const amount = decimal(form.amount);
+  const cashWarning = cashShortageMessage(paidFromAccount, amount);
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
+    if (cashWarning) return;
     submit({
       transaction_date: new Date().toISOString().slice(0, 10),
       created_by_user_id: defaultUserId(lookups.users),
@@ -751,7 +779,9 @@ function ExpenseVoucher({ lookups, submit, busy }: VoucherProps) {
       <label><span>Category</span><input value={form.expenseType} onChange={(event) => setForm({ ...form, expenseType: event.target.value })} /></label>
       <label className="checkbox-line"><input type="checkbox" checked={form.affectsSettlement} onChange={(event) => setForm({ ...form, affectsSettlement: event.target.checked })} /> <span>Charge to client</span></label>
       <label><span>Reference</span><input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></label>
-      <button type="submit" disabled={busy}>Preview</button>
+      {paidFromAccount && <div className="voucher-plain-summary"><span>Available {money(accountBalance(paidFromAccount))} {form.currency}</span></div>}
+      {cashWarning && <p className="form-note danger-note">{cashWarning}</p>}
+      <button type="submit" disabled={busy || Boolean(cashWarning)}>Preview</button>
     </form>
   );
 }

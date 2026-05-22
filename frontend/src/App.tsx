@@ -29,6 +29,7 @@ const navGroups = [
   {
     title: "Reports",
     items: [
+      ["Day Book", "/reports/day-book", ""],
       ["Cash", "/reports/cash", ""],
       ["Bank", "/reports/bank", ""],
       ["Client Ledger", "/reports/customer-ledger", ""],

@@ -138,6 +138,131 @@ def bank_report(db: Session, filters: ReportFilters) -> ReportRead:
     return _ledger_account_report(db, filters, {AccountType.BANK.value})
 
 
+def _transaction_filter_matches(
+    *,
+    transaction: Transaction,
+    entries: list[tuple[LedgerEntry, Account]],
+    components: list[tuple[TransactionComponent, Account | None]],
+    filters: ReportFilters,
+) -> bool:
+    if transaction.status not in POSTED_STATUSES:
+        return False
+    if filters.date_from and transaction.transaction_date < filters.date_from:
+        return False
+    if filters.date_to and transaction.transaction_date > filters.date_to:
+        return False
+    if filters.settlement_id and transaction.settlement_id != filters.settlement_id:
+        return False
+    if filters.currency:
+        has_currency = any(entry.currency == filters.currency for entry, _ in entries) or any(component.currency == filters.currency for component, _ in components)
+        if not has_currency:
+            return False
+    if filters.account_id:
+        has_account = any(entry.account_id == filters.account_id for entry, _ in entries) or any(component.account_id == filters.account_id for component, _ in components)
+        if not has_account:
+            return False
+    if filters.party_id:
+        has_party = any(account.party_id == filters.party_id for _, account in entries) or any(
+            component.party_id == filters.party_id or (account is not None and account.party_id == filters.party_id)
+            for component, account in components
+        )
+        if not has_party:
+            return False
+    return True
+
+
+def _day_book_party(db: Session, entries: list[tuple[LedgerEntry, Account]], components: list[tuple[TransactionComponent, Account | None]]) -> tuple[int | None, str | None]:
+    party_id = next((account.party_id for _, account in entries if account.party_id is not None), None)
+    if party_id is None:
+        party_id = next(
+            (
+                component.party_id if component.party_id is not None else account.party_id
+                for component, account in components
+                if component.party_id is not None or (account is not None and account.party_id is not None)
+            ),
+            None,
+        )
+    party = db.get(Party, party_id) if party_id is not None else None
+    return party_id, party.name if party else None
+
+
+def day_book_report(db: Session, filters: ReportFilters) -> ReportRead:
+    transactions = db.query(Transaction).filter(Transaction.status.in_(POSTED_STATUSES)).all()
+    rows: list[dict[str, object]] = []
+    totals: dict[str, Decimal] = defaultdict(_zero)
+    for transaction in transactions:
+        entries = (
+            db.query(LedgerEntry, Account)
+            .join(Account, Account.id == LedgerEntry.account_id)
+            .filter(LedgerEntry.transaction_id == transaction.id)
+            .all()
+        )
+        components = (
+            db.query(TransactionComponent, Account)
+            .outerjoin(Account, Account.id == TransactionComponent.account_id)
+            .filter(TransactionComponent.transaction_id == transaction.id)
+            .all()
+        )
+        if not _transaction_filter_matches(transaction=transaction, entries=entries, components=components, filters=filters):
+            continue
+        currencies = sorted({entry.currency for entry, _ in entries} | {component.currency for component, _ in components})
+        party_id, party_name = _day_book_party(db, entries, components)
+        cash_bank_accounts = sorted(
+            {
+                account.account_code
+                for _, account in entries
+                if account.account_type in {AccountType.CASH.value, AccountType.BANK.value}
+            }
+        )
+        for currency in currencies:
+            cash_bank_entries = [
+                (entry, account)
+                for entry, account in entries
+                if entry.currency == currency and account.account_type in {AccountType.CASH.value, AccountType.BANK.value}
+            ]
+            components_for_currency = [(component, account) for component, account in components if component.currency == currency]
+            money_in = sum((_amount(entry.debit) for entry, _ in cash_bank_entries), Decimal("0"))
+            money_out = sum((_amount(entry.credit) for entry, _ in cash_bank_entries), Decimal("0"))
+            commission = sum((component.amount for component, _ in components_for_currency if component.component_type == ComponentType.YOUR_COMMISSION.value), Decimal("0"))
+            expenses = sum((component.amount for component, _ in components_for_currency if component.component_type in {ComponentType.EXPENSE.value, ComponentType.FX_CHARGE.value}), Decimal("0"))
+            fx_difference = sum(
+                (
+                    _profitability_signed_amount(component)
+                    for component, _ in components_for_currency
+                    if component.component_type in {ComponentType.FX_GAIN.value, ComponentType.FX_LOSS.value}
+                ),
+                Decimal("0"),
+            )
+            totals[f"{currency}_money_in"] += money_in
+            totals[f"{currency}_money_out"] += money_out
+            totals[f"{currency}_net"] += money_in - money_out
+            totals[f"{currency}_commission"] += commission
+            totals[f"{currency}_expenses"] += expenses
+            totals[f"{currency}_fx_difference"] += fx_difference
+            rows.append(
+                {
+                    "transaction_date": transaction.transaction_date,
+                    "transaction_no": transaction.transaction_no,
+                    "transaction_id": transaction.id,
+                    "voucher_type": transaction.transaction_type,
+                    "party_id": party_id,
+                    "party_name": party_name,
+                    "cash_bank_accounts": ", ".join(cash_bank_accounts),
+                    "currency": currency,
+                    "money_in": money_in,
+                    "money_out": money_out,
+                    "net_movement": money_in - money_out,
+                    "commission": commission,
+                    "expense": expenses,
+                    "fx_difference": fx_difference,
+                    "status": transaction.status,
+                    "reference": transaction.description,
+                }
+            )
+    rows.sort(key=lambda row: (str(row["transaction_date"]), int(row["transaction_id"]), str(row["currency"])))
+    return ReportRead(filters=filters, rows=rows, totals=dict(totals))
+
+
 def _party_ledger(db: Session, filters: ReportFilters, party_type: str, account_types: set[str]) -> ReportRead:
     rows: list[dict[str, object]] = []
     totals: dict[str, Decimal] = defaultdict(_zero)
@@ -408,4 +533,3 @@ def dashboard_report(db: Session, filters: ReportFilters) -> DashboardReportRead
         fx_profit_loss=fx,
         net_profitability=profitability,
     )
-

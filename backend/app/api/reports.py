@@ -52,6 +52,11 @@ def bank(filters: ReportFilters = Depends(_filters), db: Session = Depends(get_d
     return report_service.bank_report(db, filters)
 
 
+@router.get("/day-book", response_model=ReportRead)
+def day_book(filters: ReportFilters = Depends(_filters), db: Session = Depends(get_db)):
+    return report_service.day_book_report(db, filters)
+
+
 @router.get("/customer-ledger", response_model=ReportRead)
 def customer_ledger(filters: ReportFilters = Depends(_filters), db: Session = Depends(get_db)):
     return report_service.customer_ledger(db, filters)

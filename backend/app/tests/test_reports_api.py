@@ -210,6 +210,27 @@ def test_bank_report_by_currency(client: TestClient, db_session: Session) -> Non
     assert total(response.json(), "USD") == Decimal("997.000000")
 
 
+def test_day_book_report_shows_daily_vouchers_and_currency_totals(client: TestClient, db_session: Session) -> None:
+    seed_report_data(client, db_session)
+
+    response = client.get("/reports/day-book?date_from=2026-05-10&date_to=2026-05-14")
+
+    assert response.status_code == 200
+    body = response.json()
+    rows = body["rows"]
+    receipt = next(row for row in rows if row["voucher_type"] == "receipt")
+    payment = next(row for row in rows if row["voucher_type"] == "payment")
+    fx = next(row for row in rows if row["voucher_type"] == "currency_exchange" and row["currency"] == "AED")
+    assert Decimal(receipt["money_in"]) == Decimal("100.000000")
+    assert Decimal(receipt["commission"]) == Decimal("5.000000")
+    assert Decimal(payment["money_out"]) == Decimal("95.000000")
+    assert Decimal(fx["money_in"]) == Decimal("400.000000")
+    assert Decimal(fx["fx_difference"]) == Decimal("10.000000")
+    assert Decimal(body["totals"]["USD_money_in"]) == Decimal("100.000000")
+    assert Decimal(body["totals"]["USD_money_out"]) == Decimal("205.000000")
+    assert Decimal(body["totals"]["AED_money_in"]) == Decimal("400.000000")
+
+
 def test_customer_ledger(client: TestClient, db_session: Session) -> None:
     data = seed_report_data(client, db_session)
 

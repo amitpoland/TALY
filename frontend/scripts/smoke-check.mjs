@@ -18,6 +18,7 @@ const requiredRoutes = [
   "/currencies",
   "/settlements",
   "/settlements/${id}",
+  "/reports/day-book",
   "/reports/dashboard",
   "/audit-logs"
 ];
@@ -55,7 +56,7 @@ if (!mainSource.includes("ReactDOM.createRoot") || !mainSource.includes("AppErro
 if (!appSource.includes("app-shell") || !appSource.includes("sidebar") || !appSource.includes("Dashboard")) {
   throw new Error("Missing visible application shell");
 }
-for (const required of ["navGroups", "Masters", "Vouchers", "System", "CommandPalette", "Search voucher, report, party, account", "Alt+C", "Alt+R", "Alt+P", "Alt+E", "Alt+X"]) {
+for (const required of ["navGroups", "Masters", "Vouchers", "System", "CommandPalette", "Search voucher, report, party, account", "Day Book", "Alt+C", "Alt+R", "Alt+P", "Alt+E", "Alt+X"]) {
   if (!appSource.includes(required)) {
     throw new Error(`Tally-style operator shell missing ${required}`);
   }
@@ -86,6 +87,11 @@ for (const forbidden of ["Charges/Commission", "Charges Value", "Charges shown",
 for (const required of ["Pay Money", "Money paid from cash/bank", "Client/vendor balance affected", "Currency Exchange", "Given Amount", "Received Amount", "Exchange Rate", "Exchange Difference"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Compressed operator workflow missing ${required}`);
+  }
+}
+for (const required of ["cashShortageMessage", "Add opening balance or choose Bank", "Available {money(accountBalance"]) {
+  if (!transactionSource.includes(required)) {
+    throw new Error(`Cash negative balance guard missing ${required}`);
   }
 }
 for (const required of ['data-searchable="true"', "onKeyDown", "ctrlKey", "metaKey", "api.previewTransaction(targetRoute, cleanPayload)", "api.postTransaction(targetRoute, cleanPayload)"]) {
