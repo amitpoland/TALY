@@ -112,6 +112,7 @@ export const api = {
   accounts: () => request<ApiRecord[]>("/accounts"),
   createAccount: (payload: ApiRecord) => request<ApiRecord>("/accounts", { method: "POST", body: JSON.stringify(payload) }),
   updateAccount: (id: string | number, payload: ApiRecord) => request<ApiRecord>(`/accounts/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  deleteAccount: (id: string | number) => request<ApiRecord>(`/accounts/${id}`, { method: "DELETE" }),
   currencies: () => request<ApiRecord[]>("/currencies"),
   users: () => request<ApiRecord[]>("/users"),
   auditLogs: () => request<ApiRecord[]>("/audit-logs"),

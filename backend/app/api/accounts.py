@@ -101,3 +101,23 @@ def update_account(account_id: int, payload: AccountUpdate, db: Session = Depend
     db.refresh(account)
     return account
 
+
+@router.delete("/{account_id}", response_model=AccountRead)
+def deactivate_account(account_id: int, db: Session = Depends(get_db)) -> Account:
+    account = db.get(Account, account_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    before = _account_snapshot(account)
+    account.is_active = False
+    db.flush()
+    write_audit_log(
+        db,
+        action="deactivate_account",
+        entity_type="account",
+        entity_id=account.id,
+        before=before,
+        after=_account_snapshot(account),
+    )
+    db.commit()
+    db.refresh(account)
+    return account

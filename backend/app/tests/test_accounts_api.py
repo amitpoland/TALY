@@ -44,3 +44,24 @@ def test_wallet_account_requires_party(client: TestClient) -> None:
     )
     assert response.status_code == 400
 
+
+def test_account_can_be_deactivated_and_restored(client: TestClient) -> None:
+    created = client.post(
+        "/accounts",
+        json={
+            "account_code": "DELETE-ME-USD",
+            "name": "Delete Me USD",
+            "account_type": "cash",
+            "currency": "USD",
+        },
+    )
+    assert created.status_code == 201
+    account_id = created.json()["id"]
+
+    deleted = client.delete(f"/accounts/{account_id}")
+    assert deleted.status_code == 200
+    assert deleted.json()["is_active"] is False
+
+    restored = client.patch(f"/accounts/{account_id}", json={"is_active": True})
+    assert restored.status_code == 200
+    assert restored.json()["is_active"] is True

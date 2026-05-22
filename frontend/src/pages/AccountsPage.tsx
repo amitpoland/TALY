@@ -24,15 +24,19 @@ export default function AccountsPage() {
   const [form, setForm] = useState(blankForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setSubmitError(null);
+    setStatusMessage(null);
     try {
       if (editingId) {
         await api.updateAccount(editingId, { name: form.name });
+        setStatusMessage("Account saved");
       } else {
         await api.createAccount({ ...form, party_id: form.party_id ? Number(form.party_id) : null });
+        setStatusMessage("Account added");
       }
       resetForm();
       reload();
@@ -48,6 +52,7 @@ export default function AccountsPage() {
 
   function editAccount(account: AccountRow) {
     setSubmitError(null);
+    setStatusMessage("Editing account name. Code, type, currency, and party stay locked.");
     setEditingId(account.id);
     setForm({
       account_code: account.account_code,
@@ -60,8 +65,17 @@ export default function AccountsPage() {
 
   async function setAccountActive(account: AccountRow, isActive: boolean) {
     setSubmitError(null);
+    setStatusMessage(null);
     try {
-      await api.updateAccount(account.id, { is_active: isActive });
+      if (isActive) {
+        await api.updateAccount(account.id, { is_active: true });
+        setStatusMessage("Account restored");
+      } else {
+        const confirmed = window.confirm(`Delete ${account.account_code}? Old vouchers stay safe. The account will be marked inactive.`);
+        if (!confirmed) return;
+        await api.deleteAccount(account.id);
+        setStatusMessage("Account deleted");
+      }
       if (editingId === account.id) {
         resetForm();
       }
@@ -97,6 +111,7 @@ export default function AccountsPage() {
         <button type="submit">{editingId ? "Save Account" : "Add Account"}</button>
         {editingId && <button type="button" className="secondary-action" onClick={resetForm}>Cancel Edit</button>}
       </form>
+      {statusMessage && <p className="form-note">{statusMessage}</p>}
       <ErrorList messages={[submitError, error]} />
       {loading && <LoadingState label="Loading accounts" />}
       {rows && <DataTable rows={rows} columns={["id", "account_code", "name", "account_type", "currency", "party_id", "current_balance", "is_active", "actions"]} />}

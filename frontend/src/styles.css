@@ -354,6 +354,17 @@ kbd {
   color: #8a2f27;
 }
 
+.form-note {
+  margin: -6px 0 14px;
+  color: #2c5d35;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.danger-note {
+  color: #8a2f27;
+}
+
 .row-actions {
   display: flex;
   flex-wrap: wrap;

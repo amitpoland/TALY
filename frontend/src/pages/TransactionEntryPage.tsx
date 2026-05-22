@@ -146,6 +146,34 @@ function firstId(accounts: Account[], types: string[], currency?: string): numbe
   return options(accounts, types, currency)[0]?.id;
 }
 
+function commissionIncomeAccount(accounts: Account[], currency: string): Account | undefined {
+  return accounts.find((account) => account.account_type === "commission_income" && account.currency === currency && account.is_active !== false);
+}
+
+async function ensureCommissionIncomeAccount(lookups: Lookups, currency: string, refreshLookups: () => void): Promise<number | undefined> {
+  const existing = commissionIncomeAccount(lookups.accounts, currency);
+  if (existing) return existing.id;
+  const accountCode = `COMMISSION-${currency}`;
+  try {
+    const created = await api.createAccount({
+      account_code: accountCode,
+      name: `Commission ${currency}`,
+      account_type: "commission_income",
+      currency
+    });
+    refreshLookups();
+    return asId(created.id);
+  } catch (err) {
+    const latestAccounts = await api.accounts();
+    const latest = commissionIncomeAccount(latestAccounts as Account[], currency);
+    if (latest) {
+      refreshLookups();
+      return latest.id;
+    }
+    throw err;
+  }
+}
+
 function findAccount(accounts: Account[], id: string) {
   return accounts.find((account) => account.id === Number(id));
 }
@@ -390,6 +418,7 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
     reference: ""
   });
   const [walletBusy, setWalletBusy] = useState(false);
+  const [setupError, setSetupError] = useState<string | null>(null);
   const receiveAccount = findAccount(lookups.accounts, form.receiveIn);
   const currency = receiveAccount?.currency ?? form.currency;
   const selectedParty = findParty(lookups.parties, form.party);
@@ -399,7 +428,6 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
   const gross = form.amountMode === "gross" ? amount : amount + commission;
   const principal = form.amountMode === "gross" ? amount - commission : amount;
   const clientBalance = partyWallet(lookups.accounts, selectedParty, currency);
-  const commissionAccount = lookups.accounts.find((account) => account.account_type === "commission_income" && account.currency === currency);
   const canPreview = Boolean(clientBalance && receiveAccount && principal >= 0 && gross > 0);
 
   async function quickCreateBalance() {
@@ -413,9 +441,17 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
     }
   }
 
-  function onSubmit(event: FormEvent) {
+  async function onSubmit(event: FormEvent) {
     event.preventDefault();
     if (!canPreview) return;
+    setSetupError(null);
+    let commissionAccountId: number | undefined;
+    try {
+      commissionAccountId = commission > 0 ? await ensureCommissionIncomeAccount(lookups, currency, refreshLookups) : undefined;
+    } catch (err) {
+      setSetupError((err as Error).message);
+      return;
+    }
     submit({
       transaction_date: new Date().toISOString().slice(0, 10),
       created_by_user_id: defaultUserId(lookups.users),
@@ -425,7 +461,7 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
       gross_amount: money(gross),
       principal_amount: money(principal),
       commission_amount: money(commission),
-      commission_income_account_id: commission > 0 ? commissionAccount?.id : undefined,
+      commission_income_account_id: commissionAccountId,
       currency,
       base_currency: DEFAULT_BASE_CURRENCY,
       original_rate: form.exchangeRate || undefined,
@@ -455,6 +491,7 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
         {receiveAccount && <span>Money received in {accountLabel(receiveAccount)}</span>}
         <span>Client balance {clientBalance ? accountLabel(clientBalance) : "Missing"}</span>
       </div>
+      {setupError && <p className="form-note danger-note">{setupError}</p>}
       {!clientBalance && <MissingBalanceNotice party={selectedParty} currency={currency} onCreate={quickCreateBalance} busy={walletBusy} />}
       {currency !== DEFAULT_BASE_CURRENCY && advancedBlock(
         <>
@@ -538,6 +575,7 @@ const emptyCashBankEntryForm = {
 function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, busy }: VoucherProps) {
   const [form, setForm] = useState(emptyCashBankEntryForm);
   const [walletBusy, setWalletBusy] = useState(false);
+  const [setupError, setSetupError] = useState<string | null>(null);
   const cashBankAccount = findAccount(lookups.accounts, form.cashBank);
   const currency = cashBankAccount?.currency ?? form.currency;
   const selectedParty = findParty(lookups.parties, form.party);
@@ -551,11 +589,11 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
   const commission = isReceipt && form.commissionType === "percentage" ? amount * commissionValue / 100 : isReceipt && form.commissionType === "fixed" ? commissionValue : 0;
   const gross = form.amountMode === "gross" ? amount : amount + commission;
   const principal = form.amountMode === "gross" ? amount - commission : amount;
-  const commissionAccount = lookups.accounts.find((account) => account.account_type === "commission_income" && account.currency === currency);
   const canPreview = Boolean(cashBankAccount && clientBalance && amount > 0 && principal >= 0);
 
   function updateForm(next: Partial<typeof emptyCashBankEntryForm>) {
     setForm((current) => ({ ...current, ...next }));
+    setSetupError(null);
     resetPreview();
   }
 
@@ -575,9 +613,17 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
     }
   }
 
-  function onSubmit(event: FormEvent) {
+  async function onSubmit(event: FormEvent) {
     event.preventDefault();
     if (!canPreview) return;
+    setSetupError(null);
+    let commissionAccountId: number | undefined;
+    try {
+      commissionAccountId = isReceipt && commission > 0 ? await ensureCommissionIncomeAccount(lookups, currency, refreshLookups) : undefined;
+    } catch (err) {
+      setSetupError((err as Error).message);
+      return;
+    }
     const common = {
       transaction_date: new Date().toISOString().slice(0, 10),
       created_by_user_id: defaultUserId(lookups.users),
@@ -594,7 +640,7 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
         gross_amount: money(gross),
         principal_amount: money(principal),
         commission_amount: money(commission),
-        commission_income_account_id: commission > 0 ? commissionAccount?.id : undefined,
+        commission_income_account_id: commissionAccountId,
         base_currency: DEFAULT_BASE_CURRENCY
       });
       return;
@@ -631,6 +677,7 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
           {clientBalances.map((account) => <span key={account.id}>{account.currency}: {String(account.current_balance ?? "0.00")}</span>)}
         </div>
       )}
+      {setupError && <p className="form-note danger-note">{setupError}</p>}
       {!clientBalance && <MissingBalanceNotice party={selectedParty} currency={currency} onCreate={quickCreateBalance} busy={walletBusy} />}
       <div className="voucher-action-row">
         <button type="submit" disabled={busy || !canPreview}>Preview</button>

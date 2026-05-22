@@ -73,6 +73,11 @@ for (const required of ["Cash / Bank Entry", "Cash/Bank", "Entry Type", "Party",
     throw new Error(`Receipt voucher missing ${required}`);
   }
 }
+for (const required of ["ensureCommissionIncomeAccount", "COMMISSION-${currency}", "commission_income", "commission_income_account_id: commissionAccountId"]) {
+  if (!transactionSource.includes(required)) {
+    throw new Error(`Receipt commission auto-account setup missing ${required}`);
+  }
+}
 for (const forbidden of ["Charges/Commission", "Charges Value", "Charges shown", "Total cash/bank impact", "Net Sent", "Gross Sent"]) {
   if (transactionSource.includes(forbidden)) {
     throw new Error(`Payment UI still suggests unsupported charge posting: ${forbidden}`);
@@ -114,12 +119,12 @@ for (const required of ["Save Party", "Cancel Edit", "Delete", "Restore", "api.u
     throw new Error(`Parties edit/delete UI missing ${required}`);
   }
 }
-for (const required of ["Save Account", "Cancel Edit", "Delete", "Restore", "api.updateAccount"]) {
+for (const required of ["Save Account", "Cancel Edit", "Delete", "Restore", "api.updateAccount", "api.deleteAccount"]) {
   if (!accountsSource.includes(required)) {
     throw new Error(`Accounts edit/delete UI missing ${required}`);
   }
 }
-for (const required of ["disabled={Boolean(editingId)}", "{ name: form.name }", "{ is_active: isActive }"]) {
+for (const required of ["disabled={Boolean(editingId)}", "{ name: form.name }", "window.confirm", "Old vouchers stay safe"]) {
   if (!accountsSource.includes(required)) {
     throw new Error(`Accounts safe edit/deactivate behavior missing ${required}`);
   }
