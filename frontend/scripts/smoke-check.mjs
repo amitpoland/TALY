@@ -41,6 +41,7 @@ const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8
 const dashboardSource = readFileSync(new URL("../src/pages/DashboardPage.tsx", import.meta.url), "utf8");
 const transactionSource = readFileSync(new URL("../src/pages/TransactionEntryPage.tsx", import.meta.url), "utf8");
 const partiesSource = readFileSync(new URL("../src/pages/PartiesPage.tsx", import.meta.url), "utf8");
+const accountsSource = readFileSync(new URL("../src/pages/AccountsPage.tsx", import.meta.url), "utf8");
 const viteSource = readFileSync(new URL("../vite.config.ts", import.meta.url), "utf8");
 const envExampleSource = readFileSync(new URL("../.env.example", import.meta.url), "utf8");
 const envDevelopmentSource = readFileSync(new URL("../.env.development", import.meta.url), "utf8");
@@ -111,6 +112,16 @@ for (const required of ["Cash Balances", "Bank Balances", "Today's Receipts", "T
 for (const required of ["Save Party", "Cancel Edit", "Delete", "Restore", "api.updateParty"]) {
   if (!partiesSource.includes(required)) {
     throw new Error(`Parties edit/delete UI missing ${required}`);
+  }
+}
+for (const required of ["Save Account", "Cancel Edit", "Delete", "Restore", "api.updateAccount"]) {
+  if (!accountsSource.includes(required)) {
+    throw new Error(`Accounts edit/delete UI missing ${required}`);
+  }
+}
+for (const required of ["disabled={Boolean(editingId)}", "{ name: form.name }", "{ is_active: isActive }"]) {
+  if (!accountsSource.includes(required)) {
+    throw new Error(`Accounts safe edit/deactivate behavior missing ${required}`);
   }
 }
 if (!envExampleSource.includes("VITE_API_BASE_URL=http://127.0.0.1:8010")) {
