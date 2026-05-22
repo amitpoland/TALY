@@ -220,7 +220,7 @@ kbd {
   background: white;
   border: 1px solid #d8e0e8;
   border-radius: 8px;
-  padding: 14px;
+  padding: 10px;
   margin-bottom: 16px;
 }
 
@@ -242,18 +242,25 @@ kbd {
 }
 
 .voucher-form {
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: 1fr;
   align-items: start;
+  gap: 6px;
+  max-width: 820px;
 }
 
 .voucher-page-header {
-  align-items: stretch;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.marg-voucher-shell .page-header h1 {
+  font-size: 22px;
 }
 
 .voucher-meta-bar {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   justify-content: flex-end;
   max-width: 520px;
 }
@@ -262,15 +269,15 @@ kbd {
   background: white;
   border: 1px solid #d8e0e8;
   border-radius: 6px;
-  padding: 7px 9px;
+  padding: 5px 8px;
   color: #445160;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .voucher-workbench {
   display: grid;
-  grid-template-columns: minmax(360px, 1.1fr) minmax(320px, 0.9fr);
-  gap: 14px;
+  grid-template-columns: minmax(420px, 820px);
+  gap: 10px;
   align-items: start;
 }
 
@@ -280,8 +287,7 @@ kbd {
 }
 
 .voucher-preview-pane {
-  position: sticky;
-  top: 16px;
+  position: static;
 }
 
 .preview-placeholder {
@@ -299,19 +305,45 @@ kbd {
   display: block;
 }
 
-.voucher-form .calculation-card {
-  display: grid;
-  gap: 6px;
-  border: 1px solid #cfe1df;
-  background: #f6fbfa;
-  border-radius: 8px;
-  padding: 12px;
-  color: #174d47;
+.voucher-form label {
+  grid-template-columns: 150px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
 }
 
-.voucher-form .calculation-card strong,
-.voucher-form .calculation-card span {
-  display: block;
+.voucher-form label span {
+  font-size: 12px;
+  font-weight: 700;
+  color: #354150;
+}
+
+.voucher-form input,
+.voucher-form select {
+  min-height: 34px;
+  padding: 6px 8px;
+}
+
+.voucher-form button[type="submit"] {
+  justify-self: start;
+  min-height: 34px;
+  padding: 7px 16px;
+  margin-top: 2px;
+}
+
+.voucher-plain-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  border-top: 1px solid #e3e9ef;
+  background: #fbfcfd;
+  padding: 8px 10px;
+  color: #174d47;
+  font-size: 12px;
+}
+
+.voucher-plain-summary span {
+  display: inline-flex;
+  white-space: nowrap;
 }
 
 .checkbox-line {
@@ -339,8 +371,8 @@ kbd {
 .tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 16px;
+  gap: 6px;
+  margin-bottom: 10px;
 }
 
 .tabs a {
@@ -349,13 +381,18 @@ kbd {
   background: white;
   border: 1px solid #d8e0e8;
   border-radius: 6px;
-  padding: 8px 10px;
+  padding: 6px 8px;
+  font-size: 13px;
 }
 
 .tabs a.active {
   border-color: #1f6b63;
   color: #174d47;
   background: #edf6f4;
+}
+
+.voucher-type-strip {
+  max-width: 900px;
 }
 
 .table-wrap {
@@ -447,8 +484,8 @@ tr:focus-within td {
 .operator-preview {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 16px;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
 .summary-strip span,
@@ -461,7 +498,7 @@ details {
 }
 
 .operator-preview div {
-  min-width: 210px;
+  min-width: 160px;
 }
 
 .operator-preview span,
@@ -476,7 +513,7 @@ details {
 
 .operator-preview strong {
   margin-top: 4px;
-  font-size: 18px;
+  font-size: 15px;
 }
 
 details {
@@ -490,12 +527,13 @@ summary {
 
 .preview-panel {
   display: grid;
-  gap: 14px;
+  gap: 10px;
+  max-width: 820px;
 }
 
 .preview-panel h2 {
   margin: 4px 0 -6px;
-  font-size: 18px;
+  font-size: 16px;
 }
 
 .primary-action {

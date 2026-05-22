@@ -86,10 +86,13 @@ for (const required of ['data-searchable="true"', "onKeyDown", "ctrlKey", "metaK
     throw new Error(`Voucher workflow behavior missing ${required}`);
   }
 }
-for (const required of ["voucher-workbench", "voucher-meta-bar", "Preview waits here", "Escape", "Ctrl+Enter"]) {
+for (const required of ["marg-voucher-shell", "voucher-workbench", "voucher-meta-bar", "Escape"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Compact voucher workflow missing ${required}`);
   }
+}
+if (transactionSource.includes("Quick Check") || transactionSource.includes("Preview waits here")) {
+  throw new Error("Voucher screen still contains bulky helper copy");
 }
 if (!transactionSource.includes("No active local user found. Run seed command.")) {
   throw new Error("Voucher UI must block preview when no active local user exists");

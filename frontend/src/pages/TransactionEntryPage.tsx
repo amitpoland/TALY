@@ -442,19 +442,18 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
       <label><span>Commission</span><select value={form.commissionType} onChange={(event) => setForm({ ...form, commissionType: event.target.value })}><option value="none">none</option><option value="percentage">%</option><option value="fixed">fixed</option></select></label>
       <label><span>Commission Value</span><input value={form.commissionValue} onChange={(event) => setForm({ ...form, commissionValue: event.target.value })} /></label>
       <label><span>Reference</span><input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></label>
-      <div className="calculation-card">
-        <strong>Quick Check</strong>
+      <div className="voucher-plain-summary">
         <span>You are receiving {money(gross)} {currency}</span>
         <span>Client credited {money(principal)} {currency}</span>
         <span>Commission earned {money(commission)} {currency}</span>
         {receiveAccount && <span>Money received in {accountLabel(receiveAccount)}</span>}
-        <span>Client Balance {clientBalance ? accountLabel(clientBalance) : "Missing"}</span>
+        <span>Client balance {clientBalance ? accountLabel(clientBalance) : "Missing"}</span>
       </div>
       {!clientBalance && <MissingBalanceNotice party={selectedParty} currency={currency} onCreate={quickCreateBalance} busy={walletBusy} />}
       {currency !== DEFAULT_BASE_CURRENCY && advancedBlock(
         <>
           <label><span>Exchange Rate</span><input value={form.exchangeRate} onChange={(event) => setForm({ ...form, exchangeRate: event.target.value })} /></label>
-          <div className="calculation-card"><span>Approx. base value {money(gross * decimal(form.exchangeRate))} {DEFAULT_BASE_CURRENCY}</span></div>
+          <div className="voucher-plain-summary"><span>Approx. base value {money(gross * decimal(form.exchangeRate))} {DEFAULT_BASE_CURRENCY}</span></div>
         </>
       )}
       <button type="submit" disabled={busy || !canPreview}>Preview</button>
@@ -507,11 +506,10 @@ function PaymentVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
       }, "Pay From", ["cash", "bank"])}
       <label><span>Amount</span><input required value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
       <label><span>Reference</span><input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></label>
-      <div className="calculation-card">
-        <strong>Quick Check</strong>
+      <div className="voucher-plain-summary">
         <span>Money paid from cash/bank {money(amount)} {currency}</span>
         <span>Client/vendor balance affected {money(amount)} {currency}</span>
-        <span>Client Balance {clientBalance ? accountLabel(clientBalance) : "Missing"}</span>
+        <span>Client balance {clientBalance ? accountLabel(clientBalance) : "Missing"}</span>
       </div>
       {!clientBalance && <MissingBalanceNotice party={selectedParty} currency={currency} onCreate={quickCreateBalance} busy={walletBusy} />}
       <button type="submit" disabled={busy || !canPreview}>Preview</button>
@@ -636,13 +634,12 @@ function FxVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
       {partySelect(lookups.parties, form.party, (party) => setForm({ ...form, party }), true, "Client")}
       {currencySelect(lookups.currencies, form.fromCurrency, (fromCurrency) => setForm({ ...form, fromCurrency }), "From")}
       {currencySelect(lookups.currencies, form.toCurrency, (toCurrency) => setForm({ ...form, toCurrency }), "To")}
-      <div className="calculation-card"><strong>From</strong><span>{fromWallet ? accountLabel(fromWallet) : "Missing Client Balance"}</span></div>
-      <div className="calculation-card"><strong>To</strong><span>{toWallet ? accountLabel(toWallet) : "Missing Client Balance"}</span></div>
+      <div className="voucher-plain-summary"><span>From {fromWallet ? accountLabel(fromWallet) : "Missing Client Balance"}</span><span>To {toWallet ? accountLabel(toWallet) : "Missing Client Balance"}</span></div>
       {!fromWallet && <MissingBalanceNotice party={selectedParty} currency={form.fromCurrency} onCreate={() => quickCreateBalance(form.fromCurrency, "from")} busy={walletBusy === "from"} />}
       {!toWallet && <MissingBalanceNotice party={selectedParty} currency={form.toCurrency} onCreate={() => quickCreateBalance(form.toCurrency, "to")} busy={walletBusy === "to"} />}
       <label><span>Given Amount</span><input required value={form.fromAmount} onChange={(event) => setForm({ ...form, fromAmount: event.target.value })} /></label>
       <label><span>Received Amount</span><input required value={form.toAmount} onChange={(event) => setForm({ ...form, toAmount: event.target.value })} /></label>
-      <div className="calculation-card"><span>Exchange Rate {actualRate ? actualRate.toFixed(6) : "0.000000"}</span><span>Exchange Difference appears after preview.</span></div>
+      <div className="voucher-plain-summary"><span>Exchange Rate {actualRate ? actualRate.toFixed(6) : "0.000000"}</span><span>Exchange Difference appears after preview.</span></div>
       <label><span>Reference</span><input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></label>
       {advancedBlock(
         <>
@@ -772,17 +769,15 @@ export default function TransactionEntryPage({ routeKey }: { routeKey: Transacti
   const title = routeTitles[routeKey];
 
   return (
-    <section onKeyDown={onShortcut}>
+    <section className="marg-voucher-shell" onKeyDown={onShortcut}>
       <header className="page-header voucher-page-header">
-        <div><h1>{title}</h1><p>{routeHelp[routeKey]}</p></div>
+        <div><h1>{title}</h1></div>
         <div className="voucher-meta-bar">
-          <span>Voucher: <strong>{title}</strong></span>
           <span>Date: <strong>{new Date().toISOString().slice(0, 10)}</strong></span>
           {routeShortcut[routeKey] && <span>Shortcut: <strong>{routeShortcut[routeKey]}</strong></span>}
-          <span>Post: <strong>Ctrl+Enter</strong></span>
         </div>
       </header>
-      <div className="tabs">
+      <div className="tabs voucher-type-strip">
         {Object.entries(transactionRoutes).map(([key]) => <NavLink key={key} to={`/transactions/${key}`}>{routeTitles[key as TransactionRouteKey]}</NavLink>)}
       </div>
       {loading && <LoadingState label="Loading entry lists" />}
@@ -792,9 +787,7 @@ export default function TransactionEntryPage({ routeKey }: { routeKey: Transacti
           {error && <ErrorState message={error} />}
           {result && <div className="state-block success">{title} posted successfully<br /><strong>{String(result.transaction_no)}</strong></div>}
         </div>
-        <aside className="voucher-preview-pane">
-          {preview ? <PreviewPanel preview={preview} payload={lastPayload} routeKey={routeKey} onPost={postTransaction} posting={busy} /> : <div className="preview-placeholder"><strong>Preview waits here</strong><span>Enter voucher details, then press Enter to preview. Confirm with Ctrl+Enter.</span></div>}
-        </aside>
+        {preview && <aside className="voucher-preview-pane"><PreviewPanel preview={preview} payload={lastPayload} routeKey={routeKey} onPost={postTransaction} posting={busy} /></aside>}
       </div>
     </section>
   );
