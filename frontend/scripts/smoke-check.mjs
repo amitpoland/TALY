@@ -53,6 +53,11 @@ if (!mainSource.includes("ReactDOM.createRoot") || !mainSource.includes("AppErro
 if (!appSource.includes("app-shell") || !appSource.includes("sidebar") || !appSource.includes("Dashboard")) {
   throw new Error("Missing visible application shell");
 }
+for (const required of ["navGroups", "Masters", "Vouchers", "System", "CommandPalette", "Search voucher, report, party, account", "Alt+R", "Alt+P", "Alt+E", "Alt+X"]) {
+  if (!appSource.includes(required)) {
+    throw new Error(`Tally-style operator shell missing ${required}`);
+  }
+}
 if (!dashboardSource.includes("<h1>Dashboard</h1>")) {
   throw new Error("Missing dashboard header");
 }
@@ -81,6 +86,11 @@ for (const required of ['data-searchable="true"', "onKeyDown", "ctrlKey", "metaK
     throw new Error(`Voucher workflow behavior missing ${required}`);
   }
 }
+for (const required of ["voucher-workbench", "voucher-meta-bar", "Preview waits here", "Escape", "Ctrl+Enter"]) {
+  if (!transactionSource.includes(required)) {
+    throw new Error(`Compact voucher workflow missing ${required}`);
+  }
+}
 if (!transactionSource.includes("No active local user found. Run seed command.")) {
   throw new Error("Voucher UI must block preview when no active local user exists");
 }
@@ -94,10 +104,10 @@ for (const required of ["Cash Balances", "Bank Balances", "Today's Receipts", "T
     throw new Error(`Operational dashboard missing ${required}`);
   }
 }
-if (!envExampleSource.includes("VITE_API_BASE_URL=http://127.0.0.1:8000")) {
+if (!envExampleSource.includes("VITE_API_BASE_URL=http://127.0.0.1:8010")) {
   throw new Error("Missing clear backend API base URL setting");
 }
-if (!envDevelopmentSource.includes("VITE_API_BASE_URL=http://127.0.0.1:8000")) {
+if (!envDevelopmentSource.includes("VITE_API_BASE_URL=http://127.0.0.1:8010")) {
   throw new Error("Missing development backend API base URL setting");
 }
 if (!apiSource.includes('replace(/\\/api\\/?$/, "")')) {

@@ -1,4 +1,4 @@
-import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
 
 import { ApiRecord, api, PreviewResponse, TransactionRouteKey, transactionRoutes } from "../api/client";
@@ -72,6 +72,13 @@ const routeHelp: Record<TransactionRouteKey, string> = {
   bankTransfer: "Move money between bank accounts.",
   expense: "Record fees, charges, and operating costs.",
   fxConversion: "Exchange one currency into another and preview the exchange difference."
+};
+
+const routeShortcut: Partial<Record<TransactionRouteKey, string>> = {
+  receipt: "Alt+R",
+  payment: "Alt+P",
+  expense: "Alt+E",
+  fxConversion: "Alt+X"
 };
 
 function asId(value: unknown): number | undefined {
@@ -701,6 +708,7 @@ export default function TransactionEntryPage({ routeKey }: { routeKey: Transacti
   const [result, setResult] = useState<ApiRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const formAreaRef = useRef<HTMLDivElement>(null);
   const { data: lookups, loading, reload } = useAsync(async () => {
     const [users, accounts, parties, settlements, currencies] = await Promise.all([api.users(), api.accounts(), api.parties(), api.settlements(), api.currencies()]);
     return { users, accounts: accounts as Account[], parties: parties as Party[], settlements: settlements as Settlement[], currencies: currencies as Currency[] };
@@ -747,6 +755,17 @@ export default function TransactionEntryPage({ routeKey }: { routeKey: Transacti
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && preview && !busy) {
       event.preventDefault();
       void postTransaction();
+      return;
+    }
+    if (event.key === "Escape") {
+      if (preview || error || result) {
+        event.preventDefault();
+        setPreview(null);
+        setError(null);
+        setResult(null);
+      }
+      const firstInput = formAreaRef.current?.querySelector("input, select, button") as HTMLElement | null;
+      firstInput?.focus();
     }
   }
 
@@ -754,17 +773,29 @@ export default function TransactionEntryPage({ routeKey }: { routeKey: Transacti
 
   return (
     <section onKeyDown={onShortcut}>
-      <header className="page-header">
+      <header className="page-header voucher-page-header">
         <div><h1>{title}</h1><p>{routeHelp[routeKey]}</p></div>
+        <div className="voucher-meta-bar">
+          <span>Voucher: <strong>{title}</strong></span>
+          <span>Date: <strong>{new Date().toISOString().slice(0, 10)}</strong></span>
+          {routeShortcut[routeKey] && <span>Shortcut: <strong>{routeShortcut[routeKey]}</strong></span>}
+          <span>Post: <strong>Ctrl+Enter</strong></span>
+        </div>
       </header>
       <div className="tabs">
         {Object.entries(transactionRoutes).map(([key]) => <NavLink key={key} to={`/transactions/${key}`}>{routeTitles[key as TransactionRouteKey]}</NavLink>)}
       </div>
       {loading && <LoadingState label="Loading entry lists" />}
-      {lookups && <VoucherForm lookups={lookups} routeKey={routeKey} submit={previewTransaction} refreshLookups={reload} busy={busy} />}
-      {error && <ErrorState message={error} />}
-      {result && <div className="state-block success">{title} posted successfully<br /><strong>{String(result.transaction_no)}</strong></div>}
-      {preview && <PreviewPanel preview={preview} payload={lastPayload} routeKey={routeKey} onPost={postTransaction} posting={busy} />}
+      <div className="voucher-workbench">
+        <div className="voucher-entry-pane" ref={formAreaRef}>
+          {lookups && <VoucherForm lookups={lookups} routeKey={routeKey} submit={previewTransaction} refreshLookups={reload} busy={busy} />}
+          {error && <ErrorState message={error} />}
+          {result && <div className="state-block success">{title} posted successfully<br /><strong>{String(result.transaction_no)}</strong></div>}
+        </div>
+        <aside className="voucher-preview-pane">
+          {preview ? <PreviewPanel preview={preview} payload={lastPayload} routeKey={routeKey} onPost={postTransaction} posting={busy} /> : <div className="preview-placeholder"><strong>Preview waits here</strong><span>Enter voucher details, then press Enter to preview. Confirm with Ctrl+Enter.</span></div>}
+        </aside>
+      </div>
     </section>
   );
 }

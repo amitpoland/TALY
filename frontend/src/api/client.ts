@@ -34,7 +34,7 @@ export type PreviewResponse = {
 
 function apiBaseUrl(): string {
   const configured = import.meta.env.VITE_API_BASE_URL?.trim();
-  const base = configured || "http://127.0.0.1:8000";
+  const base = configured || (window.location.port === "5173" ? "http://127.0.0.1:8010" : window.location.origin);
   return base.replace(/\/api\/?$/, "").replace(/\/$/, "");
 }
 
