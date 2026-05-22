@@ -330,6 +330,30 @@ kbd {
   margin-top: 2px;
 }
 
+.voucher-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.voucher-action-row button {
+  min-height: 34px;
+  padding: 7px 14px;
+}
+
+.secondary-action {
+  border-color: #7f8c99;
+  background: #f8fafc;
+  color: #253244;
+}
+
+.danger-action {
+  border-color: #b65b55;
+  background: #fff4f2;
+  color: #8a2f27;
+}
+
 .voucher-plain-summary {
   display: flex;
   flex-wrap: wrap;
@@ -344,6 +368,25 @@ kbd {
 .voucher-plain-summary span {
   display: inline-flex;
   white-space: nowrap;
+}
+
+.client-currency-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px;
+  background: #f8fafc;
+  border: 1px solid #e1e7ee;
+  border-radius: 6px;
+}
+
+.client-currency-strip span {
+  border: 1px solid #d7e0e9;
+  border-radius: 5px;
+  background: white;
+  color: #354150;
+  padding: 3px 7px;
+  font-size: 12px;
 }
 
 .checkbox-line {
