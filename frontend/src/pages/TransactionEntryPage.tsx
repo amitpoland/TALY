@@ -392,11 +392,12 @@ function SearchSelect({
 }) {
   const selected = selectOptions.find((option) => option.value === value);
   const [text, setText] = useState(selected?.label ?? "");
+  const [searching, setSearching] = useState(false);
   const listId = useMemo(() => `search-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Math.random().toString(36).slice(2)}`, [label]);
 
   useEffect(() => {
-    setText(selected?.label ?? "");
-  }, [selected?.label]);
+    if (!searching) setText(selected?.label ?? "");
+  }, [searching, selected?.label]);
 
   function choose(nextText: string) {
     setText(nextText);
@@ -409,6 +410,17 @@ function SearchSelect({
     }
   }
 
+  function beginSearch() {
+    if (searching) return;
+    setSearching(true);
+    setText("");
+  }
+
+  function finishSearch() {
+    setSearching(false);
+    setText(selected?.label ?? text);
+  }
+
   return (
     <label data-searchable="true">
       <span>{label}</span>
@@ -417,8 +429,10 @@ function SearchSelect({
         list={listId}
         value={text}
         placeholder={placeholder ?? `Search ${label.toLowerCase()}`}
+        onFocus={beginSearch}
+        onClick={beginSearch}
         onChange={(event) => choose(event.target.value)}
-        onBlur={() => setText(selected?.label ?? text)}
+        onBlur={finishSearch}
       />
       <datalist id={listId}>
         {selectOptions.map((option) => (

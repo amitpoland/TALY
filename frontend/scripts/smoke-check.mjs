@@ -168,6 +168,11 @@ for (const required of ['data-searchable="true"', "onKeyDown", "ctrlKey", "metaK
     throw new Error(`Voucher workflow behavior missing ${required}`);
   }
 }
+for (const required of ["beginSearch", "setText(\"\")", "onFocus={beginSearch}", "onClick={beginSearch}"]) {
+  if (!transactionSource.includes(required)) {
+    throw new Error(`Searchable dropdown reopen behavior missing ${required}`);
+  }
+}
 for (const required of ["marg-voucher-shell", "voucher-workbench", "voucher-meta-bar", "Escape"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Compact voucher workflow missing ${required}`);
