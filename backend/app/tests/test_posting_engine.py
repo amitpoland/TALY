@@ -344,6 +344,53 @@ def test_agent_settlement_posts_principal_and_agent_commission(
     assert any(row["voucher_type"] == "agent_settlement" and Decimal(row["expense"]) == Decimal("0.500000") for row in day_book.json()["rows"])
 
 
+def test_cross_currency_agent_settlement_uses_rate_for_client_principal(
+    client: TestClient, db_session: Session
+) -> None:
+    user = create_user(db_session)
+    settlement = create_settlement(db_session)
+    bank_aed = create_account(db_session, "AGENT-BANK-AED", "bank", "AED")
+    equity_aed = create_account(db_session, "AGENT-EQUITY-AED", "owner_equity", "AED")
+    client_usd = create_account(db_session, "AGENT-CLIENT-USD", "customer_wallet", "USD")
+    expense_aed = create_account(db_session, "AGENT-COMM-PAID-AED", "expense", "AED")
+    clearing_aed = create_account(db_session, "AGENT-FX-CLEAR-AED", "clearing", "AED")
+    clearing_usd = create_account(db_session, "AGENT-FX-CLEAR-USD", "clearing", "USD")
+    post(client, "/transactions/opening-balance/post", opening_payload(user, bank_aed, equity_aed, "500.00"))
+
+    payload = {
+        "transaction_date": "2026-05-15",
+        "created_by_user_id": user.id,
+        "settlement_id": settlement.id,
+        "paying_account_id": bank_aed.id,
+        "clearing_account_id": client_usd.id,
+        "agent_commission_expense_account_id": expense_aed.id,
+        "source_clearing_account_id": clearing_aed.id,
+        "target_clearing_account_id": clearing_usd.id,
+        "principal_amount": "100.00",
+        "payment_principal_amount": "365.00",
+        "agent_commission_amount": "5.00",
+        "currency": "USD",
+        "payment_currency": "AED",
+        "settlement_currency": "USD",
+        "original_rate": "0.2739726027",
+    }
+    preview = client.post("/transactions/agent-settlement/preview", json=payload)
+    assert preview.status_code == 200, preview.text
+    body = preview.json()
+    assert Decimal(body["settlement_effect"]["USD"]) == Decimal("-100.00")
+    assert Decimal(body["profitability_effect"]["AED"]) == Decimal("-5.00")
+    assert Decimal(body["gross_amount"]) == Decimal("370.00")
+
+    post(client, "/transactions/agent-settlement/post", payload)
+
+    db_session.refresh(bank_aed)
+    db_session.refresh(client_usd)
+    db_session.refresh(expense_aed)
+    assert bank_aed.current_balance == Decimal("130.000000")
+    assert client_usd.current_balance == Decimal("100.000000")
+    assert expense_aed.current_balance == Decimal("5.000000")
+
+
 def test_cash_handover_and_bank_transfer(client: TestClient, db_session: Session) -> None:
     user = create_user(db_session)
     cash_a = create_account(db_session, "CASH-A-USD", "cash")

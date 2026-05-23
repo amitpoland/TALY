@@ -890,21 +890,25 @@ function PaymentVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
 }
 
 function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
-  const [form, setForm] = useState({ date: todayDate(), client: "", agent: "", payFrom: "", amountMode: "net", amount: "", commissionType: "fixed", agentCommission: "", reference: "" });
+  const [form, setForm] = useState({ date: todayDate(), client: "", agent: "", payFrom: "", amountMode: "net", amount: "", commissionType: "fixed", agentCommission: "", exchangeRate: "", reference: "" });
+  const exchangeRateInputRef = useRef<HTMLInputElement>(null);
   const [walletBusy, setWalletBusy] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
   const selectedClient = findParty(lookups.parties, form.client);
   const selectedAgent = findParty(lookups.parties, form.agent);
   const payAccount = findAccount(lookups.accounts, form.payFrom);
-  const currency = payAccount?.currency ?? selectedClient?.default_currency ?? "USD";
-  const clientBalance = partyWallet(lookups.accounts, selectedClient, currency);
+  const paymentCurrency = payAccount?.currency ?? selectedClient?.default_currency ?? "USD";
+  const settlementCurrency = selectedClient?.default_currency ?? paymentCurrency;
+  const isCrossCurrency = paymentCurrency !== settlementCurrency;
+  const exchangeRate = decimal(form.exchangeRate);
+  const clientBalance = partyWallet(lookups.accounts, selectedClient, settlementCurrency);
   const amount = decimal(form.amount);
   const split = splitCommissionAmount(amount, form.amountMode, form.commissionType, decimal(form.agentCommission));
-  const principal = split.principal;
+  const paymentPrincipal = split.principal;
   const agentCommission = split.commission;
   const paidToAgent = split.gross;
+  const principal = isCrossCurrency ? baseValueFromQuotedRate(paymentPrincipal, exchangeRate) : paymentPrincipal;
   const settlementIdValue = autoSettlementId(lookups.settlements);
-  const currencyMismatch = Boolean(selectedClient?.default_currency && payAccount && selectedClient.default_currency !== payAccount.currency);
   const cashWarning = cashShortageMessage(payAccount, paidToAgent);
   const previewBlockedReason = !selectedClient
     ? "Select Client."
@@ -912,10 +916,10 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
       ? "Select Agent / Vendor."
       : !payAccount
         ? "Select Pay From."
-        : currencyMismatch
-          ? "Use Currency Exchange first. Multi-currency Agent Settlement will come later."
+        : isCrossCurrency && exchangeRate <= 0
+          ? `Enter Exchange Rate. Rate means 1 ${settlementCurrency} = ? ${paymentCurrency}.`
           : !clientBalance
-            ? `Create ${currency} Client Balance for ${selectedClient.name}.`
+            ? `Create ${settlementCurrency} Client Balance for ${selectedClient.name}.`
             : !settlementIdValue
               ? "One open settlement is required for Agent Settlement."
               : principal <= 0
@@ -924,6 +928,10 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
                   ? "Agent Commission cannot be negative."
                   : cashWarning;
   const canPreview = !previewBlockedReason;
+
+  useEffect(() => {
+    if (isCrossCurrency) exchangeRateInputRef.current?.focus();
+  }, [isCrossCurrency, paymentCurrency, settlementCurrency]);
 
   function updateForm(next: Partial<typeof form>) {
     setForm((current) => ({ ...current, ...next }));
@@ -934,7 +942,7 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
     if (!selectedClient) return;
     setWalletBusy(true);
     try {
-      await createPartyWallet(selectedClient, currency);
+      await createPartyWallet(selectedClient, settlementCurrency);
       refreshLookups();
     } finally {
       setWalletBusy(false);
@@ -947,10 +955,21 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
     setSetupError(null);
     let expenseAccountId: number | undefined;
     try {
-      expenseAccountId = await ensureAgentCommissionExpenseAccount(lookups, currency, refreshLookups);
+      expenseAccountId = await ensureAgentCommissionExpenseAccount(lookups, paymentCurrency, refreshLookups);
     } catch (err) {
       setSetupError((err as Error).message);
       return;
+    }
+    let sourceClearingId: number | undefined;
+    let targetClearingId: number | undefined;
+    if (isCrossCurrency) {
+      try {
+        sourceClearingId = await ensureHiddenClearingAccount(lookups, paymentCurrency, refreshLookups);
+        targetClearingId = await ensureHiddenClearingAccount(lookups, settlementCurrency, refreshLookups);
+      } catch (err) {
+        setSetupError((err as Error).message);
+        return;
+      }
     }
     submit({
       transaction_date: form.date,
@@ -959,10 +978,16 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
       paying_account_id: asId(form.payFrom),
       clearing_account_id: clientBalance?.id,
       agent_commission_expense_account_id: expenseAccountId,
+      source_clearing_account_id: sourceClearingId,
+      target_clearing_account_id: targetClearingId,
       agent_party_id: asId(form.agent),
       principal_amount: money(principal),
+      payment_principal_amount: money(paymentPrincipal),
       agent_commission_amount: money(agentCommission),
-      currency,
+      currency: settlementCurrency,
+      payment_currency: paymentCurrency,
+      settlement_currency: settlementCurrency,
+      original_rate: isCrossCurrency ? storedOriginalRateFromQuote(exchangeRate) : undefined,
       description: form.reference || undefined
     });
   }
@@ -974,20 +999,32 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
       {accountSelect(lookups.accounts, form.payFrom, (payFrom) => updateForm({ payFrom }), "Pay From", ["cash", "bank"])}
       <label><span>Date</span><input type="date" required value={form.date} onChange={(event) => updateForm({ date: event.target.value })} /></label>
       <label><span>Amount Type</span><select value={form.amountMode} onChange={(event) => updateForm({ amountMode: event.target.value })}><option value="net">Principal Amount</option><option value="gross">Paid to Agent</option></select></label>
-      <label><span>Amount</span><input required value={form.amount} onChange={(event) => updateForm({ amount: event.target.value })} /></label>
+      <label><span>Amount ({paymentCurrency})</span><input required value={form.amount} onChange={(event) => updateForm({ amount: event.target.value })} /></label>
+      {isCrossCurrency && (
+        <CrossCurrencyRateBox
+          moneyCurrency={paymentCurrency}
+          clientCurrency={settlementCurrency}
+          amount={paymentPrincipal}
+          exchangeRate={form.exchangeRate}
+          action="paying"
+          inputRef={exchangeRateInputRef}
+          onRateChange={(exchangeRate) => updateForm({ exchangeRate })}
+        />
+      )}
       <label><span>Agent Commission</span><select value={form.commissionType} onChange={(event) => updateForm({ commissionType: event.target.value })}><option value="fixed">fixed</option><option value="percentage">%</option><option value="none">none</option></select></label>
       <label><span>Commission Value</span><input value={form.agentCommission} onChange={(event) => updateForm({ agentCommission: event.target.value })} /></label>
       <label><span>Reference</span><input value={form.reference} onChange={(event) => updateForm({ reference: event.target.value })} /></label>
       <div className="voucher-plain-summary">
-        <span>Delivered by agent {money(principal)} {currency}</span>
-        <span>Agent commission {money(agentCommission)} {currency}</span>
-        <span>Paid to agent {money(paidToAgent)} {currency}</span>
-        <span>Your profit = earlier commission - {money(agentCommission)} {currency}</span>
-        {payAccount && <span>Available {money(accountBalance(payAccount))} {currency}</span>}
+        <span>Delivered by agent {money(principal)} {settlementCurrency}</span>
+        <span>Agent commission {money(agentCommission)} {paymentCurrency}</span>
+        <span>Paid to agent {money(paidToAgent)} {paymentCurrency}</span>
+        {isCrossCurrency && <span>Rate 1 {settlementCurrency} = {form.exchangeRate || "0"} {paymentCurrency}</span>}
+        <span>Your profit = earlier commission - {money(agentCommission)} {paymentCurrency}</span>
+        {payAccount && <span>Available {money(accountBalance(payAccount))} {paymentCurrency}</span>}
       </div>
       {setupError && <p className="form-note danger-note">{setupError}</p>}
       {cashWarning && <p className="form-note danger-note">{cashWarning}</p>}
-      {!clientBalance && !currencyMismatch && <MissingBalanceNotice party={selectedClient} currency={currency} onCreate={quickCreateBalance} busy={walletBusy} />}
+      {!clientBalance && <MissingBalanceNotice party={selectedClient} currency={settlementCurrency} onCreate={quickCreateBalance} busy={walletBusy} />}
       <div className="voucher-action-row">
         <button type="submit" className="primary-action" disabled={busy || !canPreview}>Preview Voucher</button>
         {!canPreview && <span className="action-hint">{previewBlockedReason}</span>}

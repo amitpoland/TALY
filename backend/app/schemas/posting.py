@@ -171,17 +171,33 @@ class AgentSettlementPayload(BasePostingPayload):
     paying_account_id: int
     clearing_account_id: int
     agent_commission_expense_account_id: int
+    source_clearing_account_id: int | None = None
+    target_clearing_account_id: int | None = None
     agent_party_id: int | None = None
     principal_amount: Decimal
+    payment_principal_amount: Decimal | None = None
     agent_commission_amount: Decimal = Decimal("0")
     currency: str
+    payment_currency: str | None = None
+    settlement_currency: str | None = None
+    original_rate: Decimal | None = None
+    allow_negative_balance: bool = False
 
     @model_validator(mode="after")
     def validate_agent_settlement(self):
         if self.principal_amount <= 0:
             raise ValueError("Principal amount must be positive")
+        if self.payment_principal_amount is not None and self.payment_principal_amount <= 0:
+            raise ValueError("Payment principal amount must be positive")
         if self.agent_commission_amount < 0:
             raise ValueError("Agent commission cannot be negative")
+        payment_currency = self.payment_currency or self.currency
+        settlement_currency = self.settlement_currency or self.currency
+        if payment_currency != settlement_currency:
+            if self.source_clearing_account_id is None or self.target_clearing_account_id is None:
+                raise ValueError("Cross-currency Agent Settlement requires exchange clearing accounts")
+            if self.original_rate is None or self.original_rate <= 0:
+                raise ValueError("Cross-currency Agent Settlement requires exchange rate")
         return self
 
 

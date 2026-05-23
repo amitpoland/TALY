@@ -143,6 +143,11 @@ for (const required of ["Agent Settlement", "Agent / Vendor", "Principal Amount"
     throw new Error(`Agent Settlement voucher missing ${required}`);
   }
 }
+for (const required of ["payment_principal_amount", "payment_currency", "settlement_currency", "original_rate", "CrossCurrencyRateBox"]) {
+  if (!transactionSource.includes(required)) {
+    throw new Error(`Cross-currency Agent Settlement UI missing ${required}`);
+  }
+}
 for (const required of ["cashShortageMessage", "Add opening balance or choose Bank", "Available {money(accountBalance"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Cash negative balance guard missing ${required}`);

@@ -338,23 +338,36 @@ def build_agent_settlement_preview(db: Session, payload: AgentSettlementPayload)
     ensure_positive(payload.principal_amount, "Principal amount")
     ensure_user(db, payload.created_by_user_id)
     ensure_settlement_open(db, payload.settlement_id)
-    ensure_currency(db, payload.currency)
+    payment_currency = payload.payment_currency or payload.currency
+    settlement_currency = payload.settlement_currency or payload.currency
+    is_cross_currency = payment_currency != settlement_currency
+    payment_principal_amount = payload.payment_principal_amount or payload.principal_amount
+    ensure_currency(db, payment_currency)
+    ensure_currency(db, settlement_currency)
     paying = get_account(db, payload.paying_account_id)
     clearing = get_account(db, payload.clearing_account_id)
     commission_expense = get_account(db, payload.agent_commission_expense_account_id)
-    ensure_account_currency(paying, payload.currency)
-    ensure_account_currency(clearing, payload.currency)
-    ensure_account_currency(commission_expense, payload.currency)
+    ensure_account_currency(paying, payment_currency)
+    ensure_account_currency(clearing, settlement_currency)
+    ensure_account_currency(commission_expense, payment_currency)
     ensure_account_type(paying, MOVEMENT_ACCOUNT_TYPES, "Paying")
     ensure_account_type(commission_expense, {AccountType.EXPENSE.value, AccountType.BANK_CHARGE_EXPENSE.value}, "Agent commission")
-    total_payment = payload.principal_amount + payload.agent_commission_amount
-    warning = ensure_sufficient_balance(paying, total_payment, permission_granted=False)
+    source_clearing = target_clearing = None
+    if is_cross_currency:
+        source_clearing = get_account(db, payload.source_clearing_account_id)
+        target_clearing = get_account(db, payload.target_clearing_account_id)
+        ensure_account_currency(source_clearing, payment_currency)
+        ensure_account_currency(target_clearing, settlement_currency)
+        ensure_account_type(source_clearing, {AccountType.CLEARING.value}, "Source clearing")
+        ensure_account_type(target_clearing, {AccountType.CLEARING.value}, "Target clearing")
+    total_payment = payment_principal_amount + payload.agent_commission_amount
+    warning = ensure_sufficient_balance(paying, total_payment, permission_granted=payload.allow_negative_balance)
     components = [
         ComponentDraft(
             1,
             ComponentType.PRINCIPAL.value,
             payload.principal_amount,
-            payload.currency,
+            settlement_currency,
             Direction.OUT.value,
             account_id=clearing.id,
             affects_settlement=payload.settlement_id is not None,
@@ -362,17 +375,25 @@ def build_agent_settlement_preview(db: Session, payload: AgentSettlementPayload)
             notes="Principal delivered through agent",
         )
     ]
-    entries = [
-        LedgerEntryDraft(clearing.id, payload.principal_amount, Decimal("0"), payload.currency, "Agent settlement principal"),
-        LedgerEntryDraft(paying.id, Decimal("0"), total_payment, payload.currency, "Agent settlement payment"),
-    ]
+    if is_cross_currency:
+        entries = [
+            LedgerEntryDraft(source_clearing.id, payment_principal_amount, Decimal("0"), payment_currency, "Agent settlement payment clearing"),
+            LedgerEntryDraft(paying.id, Decimal("0"), total_payment, payment_currency, "Agent settlement payment"),
+            LedgerEntryDraft(clearing.id, payload.principal_amount, Decimal("0"), settlement_currency, "Agent settlement principal"),
+            LedgerEntryDraft(target_clearing.id, Decimal("0"), payload.principal_amount, settlement_currency, "Agent settlement exchange clearing"),
+        ]
+    else:
+        entries = [
+            LedgerEntryDraft(clearing.id, payload.principal_amount, Decimal("0"), settlement_currency, "Agent settlement principal"),
+            LedgerEntryDraft(paying.id, Decimal("0"), total_payment, payment_currency, "Agent settlement payment"),
+        ]
     if payload.agent_commission_amount > 0:
         components.append(
             ComponentDraft(
                 2,
                 ComponentType.AGENT_COMMISSION_PAID.value,
                 payload.agent_commission_amount,
-                payload.currency,
+                payment_currency,
                 Direction.OUT.value,
                 account_id=commission_expense.id,
                 party_id=payload.agent_party_id,
@@ -383,10 +404,10 @@ def build_agent_settlement_preview(db: Session, payload: AgentSettlementPayload)
             )
         )
         entries.insert(
-            1,
-            LedgerEntryDraft(commission_expense.id, payload.agent_commission_amount, Decimal("0"), payload.currency, "Agent commission"),
+            1 if is_cross_currency else 1,
+            LedgerEntryDraft(commission_expense.id, payload.agent_commission_amount, Decimal("0"), payment_currency, "Agent commission"),
         )
-    return _preview(db, transaction_type=TransactionType.AGENT_SETTLEMENT.value, gross_amount=total_payment, gross_currency=payload.currency, components=components, ledger_entries=entries, warnings=[warning] if warning else [])
+    return _preview(db, transaction_type=TransactionType.AGENT_SETTLEMENT.value, gross_amount=total_payment, gross_currency=payment_currency, components=components, ledger_entries=entries, warnings=[warning] if warning else [])
 
 
 def build_cash_handover_preview(db: Session, payload: TransferPayload) -> PostingPreview:
