@@ -265,6 +265,34 @@ def test_insufficient_lot_blocked(client: TestClient, db_session: Session) -> No
     assert "Insufficient FX lots" in response.text
 
 
+def test_fx_preview_allows_negative_bank_or_wallet_with_permission(client: TestClient, db_session: Session) -> None:
+    user = create_user(db_session)
+    source = create_account(db_session, "BANK-FX-USD", "bank", "USD")
+    target = create_account(db_session, "CASH-FX-AED", "cash", "AED")
+    equity = create_account(db_session, "EQUITY-FX-USD", "owner_equity", "USD")
+    clearing_usd = create_account(db_session, "FX-NEG-CLEARING-USD", "clearing", "USD")
+    clearing_aed = create_account(db_session, "FX-NEG-CLEARING-AED", "clearing", "AED")
+    gain_loss = create_account(db_session, "FX-NEG-GL-AED", "fx_gain_loss", "AED")
+    post(client, "/transactions/opening-balance/post", opening_payload(user, source, equity, "100.00", "3.90"))
+    source.current_balance = Decimal("50.000000")
+    db_session.add(source)
+    db_session.commit()
+
+    blocked = client.post(
+        "/transactions/fx-conversion/preview",
+        json=fx_payload(user, source, target, clearing_usd, clearing_aed, gain_loss, from_amount="80.00", to_amount="320.00"),
+    )
+    allowed = client.post(
+        "/transactions/fx-conversion/preview",
+        json=fx_payload(user, source, target, clearing_usd, clearing_aed, gain_loss, from_amount="80.00", to_amount="320.00", allow_negative_balance=True),
+    )
+
+    assert blocked.status_code == 400
+    assert "Negative balance requires permission" in blocked.text
+    assert allowed.status_code == 200
+    assert "Negative balance allowed by permission" in allowed.text
+
+
 def test_fx_reversal_restores_balances_and_lots(client: TestClient, db_session: Session) -> None:
     user = create_user(db_session)
     source, target, equity, clearing_usd, clearing_aed, gain_loss, _ = fx_accounts(db_session)

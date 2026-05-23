@@ -501,7 +501,7 @@ def build_fx_conversion_preview(db: Session, payload: FxConversionPayload) -> Po
         ensure_account_currency(charge_account, payload.base_currency)
         ensure_account_type(charge_account, {AccountType.EXPENSE.value, AccountType.BANK_CHARGE_EXPENSE.value}, "FX charge")
 
-    ensure_sufficient_balance(from_account, payload.from_amount, permission_granted=False)
+    balance_warning = ensure_sufficient_balance(from_account, payload.from_amount, permission_granted=payload.allow_negative_balance)
     if payload.fx_charge > payload.to_amount and to_account.account_type == AccountType.CASH.value:
         raise HTTPException(status_code=400, detail="Cash negative balance is blocked")
     lot_plan = plan_fifo_lot_consumption(
@@ -615,5 +615,6 @@ def build_fx_conversion_preview(db: Session, payload: FxConversionPayload) -> Po
         gross_currency=payload.from_currency,
         components=components,
         ledger_entries=entries,
+        warnings=[balance_warning] if balance_warning else [],
         fx_detail=fx_detail,
     )

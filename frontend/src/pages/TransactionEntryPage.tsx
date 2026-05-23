@@ -1314,13 +1314,14 @@ function ExpenseVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
 }
 
 function FxVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
-  const [form, setForm] = useState({ date: todayDate(), party: "", fromCurrency: "EUR", toCurrency: "USD", fromAmount: "", toAmount: "", fxCharge: "0", chargeAccount: "", reference: "" });
+  const [form, setForm] = useState({ date: todayDate(), party: "", fromCurrency: "EUR", toCurrency: "USD", fromAmount: "", toAmount: "", fxCharge: "0", chargeAccount: "", allowNegativeBalance: false, reference: "" });
   const [walletBusy, setWalletBusy] = useState<"from" | "to" | null>(null);
   const [setupError, setSetupError] = useState<string | null>(null);
   const selectedParty = findParty(lookups.parties, form.party);
   const fromWallet = partyWallet(lookups.accounts, selectedParty, form.fromCurrency);
   const toWallet = partyWallet(lookups.accounts, selectedParty, form.toCurrency);
   const actualRate = decimal(form.fromAmount) ? decimal(form.toAmount) / decimal(form.fromAmount) : 0;
+  const sourceShortfall = fromWallet ? decimal(form.fromAmount) - accountBalance(fromWallet) : 0;
   const canPreview = Boolean(selectedParty && fromWallet && toWallet && decimal(form.fromAmount) > 0 && decimal(form.toAmount) > 0);
 
   async function quickCreateBalance(currency: string, target: "from" | "to") {
@@ -1367,6 +1368,7 @@ function FxVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
           base_currency: form.toCurrency,
           costing_method: "fifo",
           fx_charge: form.fxCharge || "0",
+          allow_negative_balance: form.allowNegativeBalance,
           description: form.reference || undefined
         });
       } catch (err) {
@@ -1387,6 +1389,15 @@ function FxVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
       <label><span>Given Amount</span><input required value={form.fromAmount} onChange={(event) => setForm({ ...form, fromAmount: event.target.value })} /></label>
       <label><span>Received Amount</span><input required value={form.toAmount} onChange={(event) => setForm({ ...form, toAmount: event.target.value })} /></label>
       <div className="voucher-plain-summary"><span>Exchange Rate {actualRate ? actualRate.toFixed(6) : "0.000000"}</span><span>Exchange Difference appears after preview.</span></div>
+      {fromWallet && sourceShortfall > 0 && (
+        <div className="state-block warning">
+          <span>{accountLabel(fromWallet)} has only {money(accountBalance(fromWallet))} {form.fromCurrency}. This exchange needs {money(decimal(form.fromAmount))} {form.fromCurrency}.</span>
+          <label className="checkbox-line">
+            <input type="checkbox" checked={form.allowNegativeBalance} onChange={(event) => setForm({ ...form, allowNegativeBalance: event.target.checked })} />
+            <span>Allow temporary negative balance for this preview</span>
+          </label>
+        </div>
+      )}
       <label><span>Reference</span><input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></label>
       {advancedBlock(
         <>

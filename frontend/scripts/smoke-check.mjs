@@ -128,6 +128,11 @@ for (const required of ["Pay Money", "Money paid from cash/bank", "Client/vendor
     throw new Error(`Compressed operator workflow missing ${required}`);
   }
 }
+for (const required of ["allowNegativeBalance", "allow_negative_balance", "Allow temporary negative balance"]) {
+  if (!transactionSource.includes(required)) {
+    throw new Error(`FX negative balance permission UI missing ${required}`);
+  }
+}
 for (const required of ["Agent Settlement", "Agent / Vendor", "Principal Amount", "Agent Commission", "Paid to agent", "Delivered by agent", "Earlier commission", "ensureAgentCommissionExpenseAccount"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Agent Settlement voucher missing ${required}`);

@@ -223,6 +223,7 @@ class FxConversionPayload(BasePostingPayload):
     source_lot_id: int | None = None
     fx_charge: Decimal = Decimal("0")
     allow_insufficient_lots: bool = False
+    allow_negative_balance: bool = False
 
     @model_validator(mode="after")
     def validate_fx_conversion(self):
