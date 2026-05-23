@@ -81,6 +81,11 @@ for (const required of ["receiptAmounts", "amount / (1 + rate)", "amount - princ
     throw new Error(`Receipt commission reverse calculation missing ${required}`);
   }
 }
+for (const required of ["baseValueFromQuotedRate", "amount / quoteRate", "storedOriginalRateFromQuote", "1 / quoteRate", "Rate means 1"]) {
+  if (!transactionSource.includes(required)) {
+    throw new Error(`Receipt exchange-rate direction missing ${required}`);
+  }
+}
 for (const required of ["ensureCommissionIncomeAccount", "COMMISSION-${currency}", "commission_income", "commission_income_account_id: commissionAccountId"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Receipt commission auto-account setup missing ${required}`);

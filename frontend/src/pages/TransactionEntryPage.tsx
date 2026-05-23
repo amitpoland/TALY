@@ -101,6 +101,18 @@ function money(value: number): string {
   return value.toFixed(2);
 }
 
+function preciseRate(value: number): string {
+  return value.toFixed(10).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function baseValueFromQuotedRate(amount: number, quoteRate: number): number {
+  return quoteRate > 0 ? amount / quoteRate : 0;
+}
+
+function storedOriginalRateFromQuote(quoteRate: number): string | undefined {
+  return quoteRate > 0 ? preciseRate(1 / quoteRate) : undefined;
+}
+
 function receiptAmounts(amount: number, amountMode: string, commissionType: string, commissionValue: number) {
   if (commissionType === "percentage") {
     const rate = commissionValue / 100;
@@ -493,6 +505,8 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
   const commissionValue = decimal(form.commissionValue);
   const amount = decimal(form.amount);
   const { gross, principal, commission } = receiptAmounts(amount, form.amountMode, form.commissionType, commissionValue);
+  const exchangeRate = decimal(form.exchangeRate);
+  const approxBaseValue = baseValueFromQuotedRate(gross, exchangeRate);
   const clientBalance = partyWallet(lookups.accounts, selectedParty, currency);
   const canPreview = Boolean(clientBalance && receiveAccount && principal >= 0 && gross > 0);
 
@@ -530,7 +544,7 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
       commission_income_account_id: commissionAccountId,
       currency,
       base_currency: DEFAULT_BASE_CURRENCY,
-      original_rate: form.exchangeRate || undefined,
+      original_rate: currency !== DEFAULT_BASE_CURRENCY ? storedOriginalRateFromQuote(exchangeRate) : undefined,
       description: form.reference || undefined
     });
   }
@@ -562,7 +576,10 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
       {currency !== DEFAULT_BASE_CURRENCY && advancedBlock(
         <>
           <label><span>Exchange Rate</span><input value={form.exchangeRate} onChange={(event) => setForm({ ...form, exchangeRate: event.target.value })} /></label>
-          <div className="voucher-plain-summary"><span>Approx. base value {money(gross * decimal(form.exchangeRate))} {DEFAULT_BASE_CURRENCY}</span></div>
+          <div className="voucher-plain-summary">
+            <span>Rate means 1 {DEFAULT_BASE_CURRENCY} = {form.exchangeRate || "0"} {currency}</span>
+            <span>Approx. {DEFAULT_BASE_CURRENCY} value {money(approxBaseValue)} {DEFAULT_BASE_CURRENCY}</span>
+          </div>
         </>
       )}
       <button type="submit" disabled={busy || !canPreview}>Preview</button>
