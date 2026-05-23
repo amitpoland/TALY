@@ -1,4 +1,4 @@
-import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, ReactNode, RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
 
 import { ApiRecord, api, PreviewResponse, TransactionRouteKey, transactionRoutes } from "../api/client";
@@ -115,6 +115,50 @@ function baseValueFromQuotedRate(amount: number, quoteRate: number): number {
 
 function storedOriginalRateFromQuote(quoteRate: number): string | undefined {
   return quoteRate > 0 ? preciseRate(1 / quoteRate) : undefined;
+}
+
+function CrossCurrencyRateBox({
+  moneyCurrency,
+  clientCurrency,
+  amount,
+  exchangeRate,
+  action,
+  onRateChange,
+  inputRef
+}: {
+  moneyCurrency: string;
+  clientCurrency: string;
+  amount: number;
+  exchangeRate: string;
+  action: "receiving" | "paying";
+  onRateChange: (value: string) => void;
+  inputRef?: RefObject<HTMLInputElement | null>;
+}) {
+  const rate = decimal(exchangeRate);
+  const clientAmount = baseValueFromQuotedRate(amount, rate);
+  return (
+    <div className="exchange-rate-prompt" role="alert">
+      <div>
+        <strong>Currency exchange required</strong>
+        <span>You are {action} in {moneyCurrency}, but the client balance is {clientCurrency}.</span>
+      </div>
+      <label>
+        <span>Rate: 1 {clientCurrency} =</span>
+        <input
+          ref={inputRef}
+          required
+          inputMode="decimal"
+          placeholder={`e.g. 3.65 ${moneyCurrency}`}
+          value={exchangeRate}
+          onChange={(event) => onRateChange(event.target.value)}
+        />
+        <span>{moneyCurrency}</span>
+      </label>
+      <p>
+        Client balance will use {rate > 0 ? `${money(amount)} ${moneyCurrency} / ${exchangeRate} = ${money(clientAmount)} ${clientCurrency}` : `the ${clientCurrency} amount after you enter the rate`}.
+      </p>
+    </div>
+  );
 }
 
 function receiptAmounts(amount: number, amountMode: string, commissionType: string, commissionValue: number) {
@@ -544,6 +588,7 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
     exchangeRate: "",
     reference: ""
   });
+  const exchangeRateInputRef = useRef<HTMLInputElement>(null);
   const [walletBusy, setWalletBusy] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
   const receiveAccount = findAccount(lookups.accounts, form.receiveIn);
@@ -559,6 +604,10 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
   const approxBaseValue = baseValueFromQuotedRate(amount, exchangeRate);
   const clientBalance = partyWallet(lookups.accounts, selectedParty, clientCurrency);
   const canPreview = Boolean(clientBalance && receiveAccount && principal >= 0 && amount > 0 && (!isCrossCurrency || exchangeRate > 0));
+
+  useEffect(() => {
+    if (isCrossCurrency) exchangeRateInputRef.current?.focus();
+  }, [isCrossCurrency, moneyCurrency, clientCurrency]);
 
   async function quickCreateBalance() {
     if (!selectedParty) return;
@@ -639,7 +688,17 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
         const selected = findAccount(lookups.accounts, receiveIn);
         setForm({ ...form, receiveIn, currency: selected?.currency ?? form.currency });
       }, "Receive In", ["cash", "bank"])}
-      {isCrossCurrency && <label><span>Exchange Rate</span><input required value={form.exchangeRate} onChange={(event) => setForm({ ...form, exchangeRate: event.target.value })} /></label>}
+      {isCrossCurrency && (
+        <CrossCurrencyRateBox
+          moneyCurrency={moneyCurrency}
+          clientCurrency={clientCurrency}
+          amount={amount}
+          exchangeRate={form.exchangeRate}
+          action="receiving"
+          inputRef={exchangeRateInputRef}
+          onRateChange={(exchangeRate) => setForm({ ...form, exchangeRate })}
+        />
+      )}
       <label><span>Amount Type</span><select value={form.amountMode} onChange={(event) => setForm({ ...form, amountMode: event.target.value })}><option value="net">Net Received</option><option value="gross">Gross Received</option></select></label>
       <label><span>Amount</span><input required value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
       <label><span>Commission</span><select value={form.commissionType} onChange={(event) => setForm({ ...form, commissionType: event.target.value })}><option value="none">none</option><option value="percentage">%</option><option value="fixed">fixed</option></select></label>
@@ -847,6 +906,7 @@ const emptyCashBankEntryForm = {
 
 function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, busy }: VoucherProps) {
   const [form, setForm] = useState(emptyCashBankEntryForm);
+  const exchangeRateInputRef = useRef<HTMLInputElement>(null);
   const [walletBusy, setWalletBusy] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
   const cashBankAccount = findAccount(lookups.accounts, form.cashBank);
@@ -880,6 +940,10 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
             ? "Commission cannot be more than amount."
             : cashWarning;
   const canPreview = !previewBlockedReason;
+
+  useEffect(() => {
+    if (isCrossCurrency) exchangeRateInputRef.current?.focus();
+  }, [isCrossCurrency, moneyCurrency, clientCurrency]);
 
   function updateForm(next: Partial<typeof emptyCashBankEntryForm>) {
     setForm((current) => ({ ...current, ...next }));
@@ -1004,8 +1068,18 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
       <label><span>Entry Type</span><select value={form.entryType} onChange={(event) => updateForm({ entryType: event.target.value })}><option value="receipt">Receipt</option><option value="payment">Payment</option></select></label>
       {partySelect(lookups.parties, form.party, (party) => updateForm({ party }), true, "Party")}
       <label><span>Date</span><input type="date" value={new Date().toISOString().slice(0, 10)} readOnly /></label>
-      <label><span>Amount</span><input required value={form.amount} onChange={(event) => updateForm({ amount: event.target.value })} /></label>
-      {isCrossCurrency && <label><span>Exchange Rate</span><input required value={form.exchangeRate} onChange={(event) => updateForm({ exchangeRate: event.target.value })} /></label>}
+      <label><span>{isReceipt ? "Amount Received" : "Amount Paid"}</span><input required value={form.amount} onChange={(event) => updateForm({ amount: event.target.value })} /></label>
+      {isCrossCurrency && (
+        <CrossCurrencyRateBox
+          moneyCurrency={moneyCurrency}
+          clientCurrency={clientCurrency}
+          amount={amount}
+          exchangeRate={form.exchangeRate}
+          action={isReceipt ? "receiving" : "paying"}
+          inputRef={exchangeRateInputRef}
+          onRateChange={(exchangeRate) => updateForm({ exchangeRate })}
+        />
+      )}
       {isReceipt && <label><span>Amount Type</span><select value={form.amountMode} onChange={(event) => updateForm({ amountMode: event.target.value })}><option value="net">Net Received</option><option value="gross">Gross Received</option></select></label>}
       {isReceipt && <label><span>Commission</span><select value={form.commissionType} onChange={(event) => updateForm({ commissionType: event.target.value })}><option value="none">none</option><option value="percentage">%</option><option value="fixed">fixed</option></select></label>}
       {isReceipt && <label><span>Commission Value</span><input value={form.commissionValue} onChange={(event) => updateForm({ commissionValue: event.target.value })} /></label>}

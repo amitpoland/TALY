@@ -330,6 +330,54 @@ kbd {
   margin-top: 2px;
 }
 
+.exchange-rate-prompt {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(260px, 1.4fr);
+  gap: 8px 14px;
+  align-items: center;
+  border: 2px solid #d7a322;
+  border-radius: 8px;
+  background: #fff8df;
+  padding: 10px 12px;
+  color: #263442;
+}
+
+.exchange-rate-prompt strong,
+.exchange-rate-prompt span,
+.exchange-rate-prompt p {
+  display: block;
+}
+
+.exchange-rate-prompt strong {
+  font-size: 14px;
+  color: #6d4f00;
+}
+
+.exchange-rate-prompt label {
+  display: grid;
+  grid-template-columns: auto minmax(110px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+}
+
+.exchange-rate-prompt label span {
+  white-space: nowrap;
+}
+
+.exchange-rate-prompt input {
+  border-color: #b88914;
+  background: white;
+  font-weight: 800;
+}
+
+.exchange-rate-prompt p {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 12px;
+  color: #5d4b1d;
+}
+
 .voucher-action-row {
   position: sticky;
   bottom: 0;
@@ -709,5 +757,10 @@ summary {
 
   .voucher-meta-bar {
     justify-content: flex-start;
+  }
+
+  .exchange-rate-prompt,
+  .exchange-rate-prompt label {
+    grid-template-columns: 1fr;
   }
 }

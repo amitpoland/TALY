@@ -83,7 +83,7 @@ for (const required of ["receiptAmounts", "amount / (1 + rate)", "amount - princ
     throw new Error(`Receipt commission reverse calculation missing ${required}`);
   }
 }
-for (const required of ["baseValueFromQuotedRate", "amount / quoteRate", "storedOriginalRateFromQuote", "1 / quoteRate", "Rate means 1"]) {
+for (const required of ["CrossCurrencyRateBox", "Currency exchange required", "baseValueFromQuotedRate", "amount / quoteRate", "storedOriginalRateFromQuote", "1 / quoteRate", "Rate: 1", "Client balance will use"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Receipt exchange-rate direction missing ${required}`);
   }
