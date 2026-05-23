@@ -199,6 +199,13 @@ function cashShortageMessage(account: Account | undefined, amount: number): stri
   return `${accountLabel(account)} has only ${money(balance)} ${account.currency}. Add opening balance or choose Bank.`;
 }
 
+function balanceShortageMessage(account: Account | undefined, amount: number, action = "Choose another source or add opening balance."): string | null {
+  if (!account || amount <= 0) return null;
+  const balance = accountBalance(account);
+  if (balance >= amount) return null;
+  return `${accountLabel(account)} has only ${money(balance)} ${account.currency}. ${action}`;
+}
+
 function settlementId(settlement: Settlement): number | undefined {
   return settlement.id ?? settlement.settlement_id;
 }
@@ -251,6 +258,11 @@ function partyWallet(accounts: Account[], party?: Party, currency?: string): Acc
   if (!party || !currency) return undefined;
   const type = walletTypeForParty(party);
   return accounts.find((account) => account.party_id === party.id && account.currency === currency && account.account_type === type);
+}
+
+function agentAdvanceAccount(accounts: Account[], party?: Party, currency?: string): Account | undefined {
+  if (!party || !currency) return undefined;
+  return accounts.find((account) => account.party_id === party.id && account.currency === currency && account.account_type === "agent_wallet" && account.is_active !== false);
 }
 
 function walletCode(party: Party, currency: string): string {
@@ -631,6 +643,17 @@ async function createPartyWallet(party: Party, currency: string) {
   });
 }
 
+async function createAgentAdvance(party: Party, currency: string) {
+  const accountCode = `${walletCode(party, currency)}-ADVANCE`;
+  return api.createAccount({
+    account_code: accountCode,
+    name: `${party.name} ${currency} Agent Advance`,
+    account_type: "agent_wallet",
+    currency,
+    party_id: party.id
+  });
+}
+
 function hiddenClearingAccount(accounts: Account[], currency: string): Account | undefined {
   return accounts.find((account) => account.account_type === "clearing" && account.currency === currency && account.account_code === `FX-CLEARING-${currency}` && account.is_active !== false)
     ?? accounts.find((account) => account.account_type === "clearing" && account.currency === currency && account.is_active !== false);
@@ -909,14 +932,17 @@ function PaymentVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
 }
 
 function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
-  const [form, setForm] = useState({ date: todayDate(), client: "", agent: "", payFrom: "", amountMode: "net", amount: "", commissionType: "fixed", agentCommission: "", exchangeRate: "", reference: "" });
+  const [form, setForm] = useState({ date: todayDate(), client: "", agent: "", paymentSource: "agent_advance", payFrom: "", advanceCurrency: "USD", amountMode: "net", amount: "", commissionType: "fixed", agentCommission: "", exchangeRate: "", reference: "" });
   const exchangeRateInputRef = useRef<HTMLInputElement>(null);
   const [walletBusy, setWalletBusy] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
   const selectedClient = findParty(lookups.parties, form.client);
   const selectedAgent = findParty(lookups.parties, form.agent);
   const payAccount = findAccount(lookups.accounts, form.payFrom);
-  const paymentCurrency = payAccount?.currency ?? selectedClient?.default_currency ?? "USD";
+  const usesAdvance = form.paymentSource === "agent_advance";
+  const paymentCurrency = usesAdvance ? form.advanceCurrency : (payAccount?.currency ?? selectedClient?.default_currency ?? "USD");
+  const advanceAccount = agentAdvanceAccount(lookups.accounts, selectedAgent, paymentCurrency);
+  const paymentSourceAccount = usesAdvance ? advanceAccount : payAccount;
   const settlementCurrency = selectedClient?.default_currency ?? paymentCurrency;
   const isCrossCurrency = paymentCurrency !== settlementCurrency;
   const exchangeRate = decimal(form.exchangeRate);
@@ -928,12 +954,16 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
   const paidToAgent = split.gross;
   const principal = isCrossCurrency ? baseValueFromQuotedRate(paymentPrincipal, exchangeRate) : paymentPrincipal;
   const settlementIdValue = autoSettlementId(lookups.settlements);
-  const cashWarning = cashShortageMessage(payAccount, paidToAgent);
+  const cashWarning = usesAdvance
+    ? balanceShortageMessage(advanceAccount, paidToAgent, "Add agent advance first or use Pay Now.")
+    : cashShortageMessage(payAccount, paidToAgent);
   const previewBlockedReason = !selectedClient
     ? "Select Client."
     : !selectedAgent
       ? "Select Agent / Vendor."
-      : !payAccount
+      : usesAdvance && !advanceAccount
+        ? `Create ${paymentCurrency} Agent Advance for ${selectedAgent.name}.`
+      : !usesAdvance && !payAccount
         ? "Select Pay From."
         : isCrossCurrency && exchangeRate <= 0
           ? `Enter Exchange Rate. Rate means 1 ${settlementCurrency} = ? ${paymentCurrency}.`
@@ -960,6 +990,17 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
     setWalletBusy(true);
     try {
       await createPartyWallet(selectedClient, settlementCurrency);
+      refreshLookups();
+    } finally {
+      setWalletBusy(false);
+    }
+  }
+
+  async function quickCreateAgentAdvance() {
+    if (!selectedAgent) return;
+    setWalletBusy(true);
+    try {
+      await createAgentAdvance(selectedAgent, paymentCurrency);
       refreshLookups();
     } finally {
       setWalletBusy(false);
@@ -999,7 +1040,8 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
       transaction_date: form.date,
       created_by_user_id: defaultUserId(lookups.users),
       settlement_id: activeSettlementId,
-      paying_account_id: asId(form.payFrom),
+      paying_account_id: usesAdvance ? undefined : asId(form.payFrom),
+      agent_advance_account_id: usesAdvance ? advanceAccount?.id : undefined,
       clearing_account_id: clientBalance?.id,
       agent_commission_expense_account_id: expenseAccountId,
       source_clearing_account_id: sourceClearingId,
@@ -1011,6 +1053,7 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
       currency: settlementCurrency,
       payment_currency: paymentCurrency,
       settlement_currency: settlementCurrency,
+      payment_source: usesAdvance ? "agent_advance" : "cash_bank",
       original_rate: isCrossCurrency ? storedOriginalRateFromQuote(exchangeRate) : undefined,
       description: form.reference || undefined
     });
@@ -1020,7 +1063,16 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
     <form className="entry-form voucher-form" onSubmit={onSubmit}>
       {partySelect(lookups.parties, form.client, (client) => updateForm({ client }), true, "Client")}
       {partySelect(lookups.parties, form.agent, (agent) => updateForm({ agent }), true, "Agent / Vendor")}
-      {accountSelect(lookups.accounts, form.payFrom, (payFrom) => updateForm({ payFrom }), "Pay From", ["cash", "bank"])}
+      <label><span>Settlement Source</span><select value={form.paymentSource} onChange={(event) => updateForm({ paymentSource: event.target.value })}><option value="agent_advance">Use Agent Advance</option><option value="cash_bank">Pay Now Cash/Bank</option></select></label>
+      {usesAdvance
+        ? currencySelect(lookups.currencies, form.advanceCurrency, (advanceCurrency) => updateForm({ advanceCurrency }), "Currency")
+        : accountSelect(lookups.accounts, form.payFrom, (payFrom) => updateForm({ payFrom }), "Pay From", ["cash", "bank"])}
+      {usesAdvance && !advanceAccount && (
+        <div className="state-block warning">
+          <span>No {paymentCurrency} Agent Advance exists for {selectedAgent?.name}. Create it to use already-paid money.</span>
+          <button type="button" onClick={quickCreateAgentAdvance} disabled={walletBusy}>{walletBusy ? "Creating..." : "Create Agent Advance"}</button>
+        </div>
+      )}
       <label><span>Date</span><input type="date" required value={form.date} onChange={(event) => updateForm({ date: event.target.value })} /></label>
       <label><span>Amount Type</span><select value={form.amountMode} onChange={(event) => updateForm({ amountMode: event.target.value })}><option value="net">Principal Amount</option><option value="gross">Paid to Agent</option></select></label>
       <label><span>Amount ({paymentCurrency})</span><input required value={form.amount} onChange={(event) => updateForm({ amount: event.target.value })} /></label>
@@ -1041,10 +1093,10 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
       <div className="voucher-plain-summary">
         <span>Delivered by agent {money(principal)} {settlementCurrency}</span>
         <span>Agent commission {money(agentCommission)} {paymentCurrency}</span>
-        <span>Paid to agent {money(paidToAgent)} {paymentCurrency}</span>
+        <span>{usesAdvance ? "Adjusted from agent advance" : "Paid to agent"} {money(paidToAgent)} {paymentCurrency}</span>
         {isCrossCurrency && <span>Rate 1 {settlementCurrency} = {form.exchangeRate || "0"} {paymentCurrency}</span>}
         <span>Your profit = earlier commission - {money(agentCommission)} {paymentCurrency}</span>
-        {payAccount && <span>Available {money(accountBalance(payAccount))} {paymentCurrency}</span>}
+        {paymentSourceAccount && <span>Available {money(accountBalance(paymentSourceAccount))} {paymentCurrency}</span>}
         {!settlementIdValue && <span>New settlement will be created automatically</span>}
       </div>
       {setupError && <p className="form-note danger-note">{setupError}</p>}

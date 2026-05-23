@@ -344,13 +344,17 @@ def build_agent_settlement_preview(db: Session, payload: AgentSettlementPayload)
     payment_principal_amount = payload.payment_principal_amount or payload.principal_amount
     ensure_currency(db, payment_currency)
     ensure_currency(db, settlement_currency)
-    paying = get_account(db, payload.paying_account_id)
+    paying_account_id = payload.paying_account_id if payload.payment_source == "cash_bank" else payload.agent_advance_account_id
+    paying = get_account(db, paying_account_id)
     clearing = get_account(db, payload.clearing_account_id)
     commission_expense = get_account(db, payload.agent_commission_expense_account_id)
     ensure_account_currency(paying, payment_currency)
     ensure_account_currency(clearing, settlement_currency)
     ensure_account_currency(commission_expense, payment_currency)
-    ensure_account_type(paying, MOVEMENT_ACCOUNT_TYPES, "Paying")
+    if payload.payment_source == "cash_bank":
+        ensure_account_type(paying, MOVEMENT_ACCOUNT_TYPES, "Paying")
+    else:
+        ensure_account_type(paying, {AccountType.AGENT_WALLET.value}, "Agent advance")
     ensure_account_type(commission_expense, {AccountType.EXPENSE.value, AccountType.BANK_CHARGE_EXPENSE.value}, "Agent commission")
     source_clearing = target_clearing = None
     if is_cross_currency:
@@ -378,14 +382,14 @@ def build_agent_settlement_preview(db: Session, payload: AgentSettlementPayload)
     if is_cross_currency:
         entries = [
             LedgerEntryDraft(source_clearing.id, payment_principal_amount, Decimal("0"), payment_currency, "Agent settlement payment clearing"),
-            LedgerEntryDraft(paying.id, Decimal("0"), total_payment, payment_currency, "Agent settlement payment"),
+            LedgerEntryDraft(paying.id, Decimal("0"), total_payment, payment_currency, "Agent settlement payment" if payload.payment_source == "cash_bank" else "Use agent advance"),
             LedgerEntryDraft(clearing.id, payload.principal_amount, Decimal("0"), settlement_currency, "Agent settlement principal"),
             LedgerEntryDraft(target_clearing.id, Decimal("0"), payload.principal_amount, settlement_currency, "Agent settlement exchange clearing"),
         ]
     else:
         entries = [
             LedgerEntryDraft(clearing.id, payload.principal_amount, Decimal("0"), settlement_currency, "Agent settlement principal"),
-            LedgerEntryDraft(paying.id, Decimal("0"), total_payment, payment_currency, "Agent settlement payment"),
+            LedgerEntryDraft(paying.id, Decimal("0"), total_payment, payment_currency, "Agent settlement payment" if payload.payment_source == "cash_bank" else "Use agent advance"),
         ]
     if payload.agent_commission_amount > 0:
         components.append(

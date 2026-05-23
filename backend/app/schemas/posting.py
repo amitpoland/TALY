@@ -168,7 +168,8 @@ class CrossCurrencyPaymentPayload(BasePostingPayload):
 
 
 class AgentSettlementPayload(BasePostingPayload):
-    paying_account_id: int
+    paying_account_id: int | None = None
+    agent_advance_account_id: int | None = None
     clearing_account_id: int
     agent_commission_expense_account_id: int
     source_clearing_account_id: int | None = None
@@ -182,9 +183,16 @@ class AgentSettlementPayload(BasePostingPayload):
     settlement_currency: str | None = None
     original_rate: Decimal | None = None
     allow_negative_balance: bool = False
+    payment_source: str = "cash_bank"
 
     @model_validator(mode="after")
     def validate_agent_settlement(self):
+        if self.payment_source not in {"cash_bank", "agent_advance"}:
+            raise ValueError("Agent settlement payment source must be cash_bank or agent_advance")
+        if self.payment_source == "cash_bank" and self.paying_account_id is None:
+            raise ValueError("Pay From is required when paying now")
+        if self.payment_source == "agent_advance" and self.agent_advance_account_id is None:
+            raise ValueError("Agent advance balance is required when using advance")
         if self.principal_amount <= 0:
             raise ValueError("Principal amount must be positive")
         if self.payment_principal_amount is not None and self.payment_principal_amount <= 0:

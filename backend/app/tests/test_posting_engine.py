@@ -391,6 +391,43 @@ def test_cross_currency_agent_settlement_uses_rate_for_client_principal(
     assert expense_aed.current_balance == Decimal("5.000000")
 
 
+def test_agent_settlement_can_use_existing_agent_advance_without_cash_movement(
+    client: TestClient, db_session: Session
+) -> None:
+    user = create_user(db_session)
+    settlement = create_settlement(db_session)
+    agent_advance = create_account(db_session, "AGENT-ADVANCE-USD", "agent_wallet", "USD")
+    equity = create_account(db_session, "AGENT-ADVANCE-EQUITY", "owner_equity", "USD")
+    client_wallet = create_account(db_session, "AGENT-ADVANCE-CLIENT", "customer_wallet", "USD")
+    commission_expense = create_account(db_session, "AGENT-ADVANCE-COMM", "expense", "USD")
+    post(client, "/transactions/opening-balance/post", opening_payload(user, agent_advance, equity, "100.50"))
+
+    payload = {
+        "transaction_date": "2026-05-15",
+        "created_by_user_id": user.id,
+        "settlement_id": settlement.id,
+        "payment_source": "agent_advance",
+        "agent_advance_account_id": agent_advance.id,
+        "clearing_account_id": client_wallet.id,
+        "agent_commission_expense_account_id": commission_expense.id,
+        "principal_amount": "100.00",
+        "agent_commission_amount": "0.50",
+        "currency": "USD",
+    }
+    preview = client.post("/transactions/agent-settlement/preview", json=payload)
+    assert preview.status_code == 200, preview.text
+    assert not any(entry["description"] == "Agent settlement payment" for entry in preview.json()["ledger_entries"])
+
+    post(client, "/transactions/agent-settlement/post", payload)
+
+    db_session.refresh(agent_advance)
+    db_session.refresh(client_wallet)
+    db_session.refresh(commission_expense)
+    assert agent_advance.current_balance == Decimal("0.000000")
+    assert client_wallet.current_balance == Decimal("100.000000")
+    assert commission_expense.current_balance == Decimal("0.500000")
+
+
 def test_cash_handover_and_bank_transfer(client: TestClient, db_session: Session) -> None:
     user = create_user(db_session)
     cash_a = create_account(db_session, "CASH-A-USD", "cash")

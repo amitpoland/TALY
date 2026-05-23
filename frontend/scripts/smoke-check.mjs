@@ -156,6 +156,11 @@ for (const required of ["payment_principal_amount", "payment_currency", "settlem
     throw new Error(`Cross-currency Agent Settlement UI missing ${required}`);
   }
 }
+for (const required of ["Use Agent Advance", "Pay Now Cash/Bank", "agent_advance_account_id", "createAgentAdvance", "Adjusted from agent advance"]) {
+  if (!transactionSource.includes(required)) {
+    throw new Error(`Agent advance settlement UI missing ${required}`);
+  }
+}
 for (const required of ["cashShortageMessage", "Add opening balance or choose Bank", "Available {money(accountBalance"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Cash negative balance guard missing ${required}`);
