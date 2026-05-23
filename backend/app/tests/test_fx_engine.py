@@ -265,6 +265,34 @@ def test_insufficient_lot_blocked(client: TestClient, db_session: Session) -> No
     assert "Insufficient FX lots" in response.text
 
 
+def test_fx_preview_can_use_entered_rate_when_lot_history_missing(client: TestClient, db_session: Session) -> None:
+    user = create_user(db_session)
+    source, target, equity, clearing_usd, clearing_aed, gain_loss, _ = fx_accounts(db_session)
+    post(
+        client,
+        "/transactions/opening-balance/post",
+        {
+            "transaction_date": "2026-05-15",
+            "created_by_user_id": user.id,
+            "account_id": source.id,
+            "equity_account_id": equity.id,
+            "amount": "100.00",
+            "currency": "USD",
+        },
+    )
+
+    response = client.post(
+        "/transactions/fx-conversion/preview",
+        json=fx_payload(user, source, target, clearing_usd, clearing_aed, gain_loss, from_amount="100.00", to_amount="400.00", allow_insufficient_lots=True),
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert Decimal(data["fx_detail"]["weighted_avg_rate"]) == Decimal("4.000000")
+    assert Decimal(data["fx_detail"]["fx_difference"]) == Decimal("0.000000")
+    assert "Missing old FX history" in response.text
+
+
 def test_fx_preview_allows_negative_bank_or_wallet_with_permission(client: TestClient, db_session: Session) -> None:
     user = create_user(db_session)
     source = create_account(db_session, "BANK-FX-USD", "bank", "USD")

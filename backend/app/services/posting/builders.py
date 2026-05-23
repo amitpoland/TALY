@@ -512,6 +512,7 @@ def build_fx_conversion_preview(db: Session, payload: FxConversionPayload) -> Po
         amount=payload.from_amount,
         allow_insufficient_lots=payload.allow_insufficient_lots,
         source_lot_id=payload.source_lot_id,
+        fallback_rate=payload.to_amount / payload.from_amount,
     )
     actual_base_value = payload.to_amount
     fx_difference = actual_base_value - lot_plan.original_base_value
@@ -608,6 +609,9 @@ def build_fx_conversion_preview(db: Session, payload: FxConversionPayload) -> Po
         "fx_difference": fx_difference,
         "fx_charge": payload.fx_charge,
     }
+    warnings = [balance_warning] if balance_warning else []
+    if payload.allow_insufficient_lots and not lot_plan.consumptions:
+        warnings.append("Missing old FX history: using entered exchange rate as original cost")
     return _preview(
         db,
         transaction_type=TransactionType.CURRENCY_EXCHANGE.value,
@@ -615,6 +619,6 @@ def build_fx_conversion_preview(db: Session, payload: FxConversionPayload) -> Po
         gross_currency=payload.from_currency,
         components=components,
         ledger_entries=entries,
-        warnings=[balance_warning] if balance_warning else [],
+        warnings=warnings,
         fx_detail=fx_detail,
     )

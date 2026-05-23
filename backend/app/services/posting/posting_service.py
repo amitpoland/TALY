@@ -223,6 +223,7 @@ def _persist_preview(
             amount=payload.from_amount,
             allow_insufficient_lots=payload.allow_insufficient_lots,
             source_lot_id=payload.source_lot_id,
+            fallback_rate=payload.to_amount / payload.from_amount,
         )
         persist_lot_consumptions(db, fx_conversion_id=fx.id, plan=plan)
 

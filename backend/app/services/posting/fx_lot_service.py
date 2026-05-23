@@ -65,6 +65,7 @@ def plan_fifo_lot_consumption(
     amount: Decimal,
     allow_insufficient_lots: bool = False,
     source_lot_id: int | None = None,
+    fallback_rate: Decimal | None = None,
 ) -> LotConsumptionPlan:
     query = (
             db.query(ExchangeRateLot)
@@ -101,7 +102,9 @@ def plan_fifo_lot_consumption(
     if remaining > 0 and not allow_insufficient_lots:
         raise HTTPException(status_code=400, detail="Insufficient FX lots for source amount")
     if remaining > 0:
-        raise HTTPException(status_code=400, detail="Insufficient lot override is not wired to admin permissions yet")
+        if fallback_rate is None or fallback_rate <= 0:
+            raise HTTPException(status_code=400, detail="Missing FX history requires a positive fallback rate")
+        original_base_value += remaining * fallback_rate
     if amount <= 0:
         raise HTTPException(status_code=400, detail="FX source amount must be positive")
 

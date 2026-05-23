@@ -1314,7 +1314,7 @@ function ExpenseVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
 }
 
 function FxVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
-  const [form, setForm] = useState({ date: todayDate(), party: "", fromCurrency: "EUR", toCurrency: "USD", fromAmount: "", toAmount: "", fxCharge: "0", chargeAccount: "", allowNegativeBalance: false, reference: "" });
+  const [form, setForm] = useState({ date: todayDate(), party: "", fromCurrency: "EUR", toCurrency: "USD", fromAmount: "", toAmount: "", fxCharge: "0", chargeAccount: "", allowNegativeBalance: false, allowMissingRateHistory: true, reference: "" });
   const [walletBusy, setWalletBusy] = useState<"from" | "to" | null>(null);
   const [setupError, setSetupError] = useState<string | null>(null);
   const selectedParty = findParty(lookups.parties, form.party);
@@ -1369,6 +1369,7 @@ function FxVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
           costing_method: "fifo",
           fx_charge: form.fxCharge || "0",
           allow_negative_balance: form.allowNegativeBalance,
+          allow_insufficient_lots: form.allowMissingRateHistory,
           description: form.reference || undefined
         });
       } catch (err) {
@@ -1398,6 +1399,13 @@ function FxVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
           </label>
         </div>
       )}
+      <div className="state-block warning">
+        <span>If old FX purchase history is missing, use this entered rate as the original cost for this exchange.</span>
+        <label className="checkbox-line">
+          <input type="checkbox" checked={form.allowMissingRateHistory} onChange={(event) => setForm({ ...form, allowMissingRateHistory: event.target.checked })} />
+          <span>Use entered rate when old FX history is missing</span>
+        </label>
+      </div>
       <label><span>Reference</span><input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></label>
       {advancedBlock(
         <>

@@ -133,6 +133,11 @@ for (const required of ["allowNegativeBalance", "allow_negative_balance", "Allow
     throw new Error(`FX negative balance permission UI missing ${required}`);
   }
 }
+for (const required of ["allowMissingRateHistory", "allow_insufficient_lots", "Use entered rate when old FX history is missing"]) {
+  if (!transactionSource.includes(required)) {
+    throw new Error(`FX missing-rate-history permission UI missing ${required}`);
+  }
+}
 for (const required of ["Agent Settlement", "Agent / Vendor", "Principal Amount", "Agent Commission", "Paid to agent", "Delivered by agent", "Earlier commission", "ensureAgentCommissionExpenseAccount"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Agent Settlement voucher missing ${required}`);
