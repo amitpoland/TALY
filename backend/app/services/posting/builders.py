@@ -13,6 +13,8 @@ from app.core.enums import (
 )
 from app.schemas.posting import (
     AgentSettlementPayload,
+    CrossCurrencyPaymentPayload,
+    CrossCurrencyReceiptPayload,
     ExpensePayload,
     FxConversionPayload,
     OpeningBalancePayload,
@@ -220,6 +222,116 @@ def build_payment_preview(db: Session, payload: PaymentPayload) -> PostingPrevie
         LedgerEntryDraft(paying.id, Decimal("0"), payload.amount, payload.currency, "Payment"),
     ]
     return _preview(db, transaction_type=TransactionType.PAYMENT.value, gross_amount=payload.amount, gross_currency=payload.currency, components=components, ledger_entries=entries, warnings=[warning] if warning else [])
+
+
+def build_cross_currency_receipt_preview(db: Session, payload: CrossCurrencyReceiptPayload) -> PostingPreview:
+    ensure_user(db, payload.created_by_user_id)
+    ensure_settlement_open(db, payload.settlement_id)
+    ensure_currency(db, payload.received_currency)
+    ensure_currency(db, payload.settlement_currency)
+    receiving = get_account(db, payload.receiving_account_id)
+    clearing = get_account(db, payload.clearing_account_id)
+    source_clearing = get_account(db, payload.source_clearing_account_id)
+    target_clearing = get_account(db, payload.target_clearing_account_id)
+    ensure_account_currency(receiving, payload.received_currency)
+    ensure_account_currency(source_clearing, payload.received_currency)
+    ensure_account_currency(clearing, payload.settlement_currency)
+    ensure_account_currency(target_clearing, payload.settlement_currency)
+    ensure_account_type(receiving, MOVEMENT_ACCOUNT_TYPES, "Receiving")
+    ensure_account_type(source_clearing, {AccountType.CLEARING.value}, "Source clearing")
+    ensure_account_type(target_clearing, {AccountType.CLEARING.value}, "Target clearing")
+
+    settlement_gross = payload.principal_amount + payload.commission_amount
+    components = [
+        ComponentDraft(1, ComponentType.GROSS_RECEIPT.value, payload.gross_amount, payload.received_currency, Direction.IN.value, account_id=receiving.id),
+        ComponentDraft(
+            2,
+            ComponentType.PRINCIPAL.value,
+            payload.principal_amount,
+            payload.settlement_currency,
+            Direction.IN.value,
+            account_id=clearing.id,
+            affects_settlement=payload.settlement_id is not None,
+            settlement_effect_type=SettlementEffectType.PRINCIPAL_IN.value,
+        ),
+    ]
+    entries = [
+        LedgerEntryDraft(receiving.id, payload.gross_amount, Decimal("0"), payload.received_currency, "Receipt"),
+        LedgerEntryDraft(source_clearing.id, Decimal("0"), payload.gross_amount, payload.received_currency, "Receipt FX clearing"),
+        LedgerEntryDraft(target_clearing.id, settlement_gross, Decimal("0"), payload.settlement_currency, "Receipt FX value"),
+        LedgerEntryDraft(clearing.id, Decimal("0"), payload.principal_amount, payload.settlement_currency, "Receipt principal"),
+    ]
+    if payload.commission_amount > 0:
+        commission_account = get_account(db, payload.commission_income_account_id)
+        ensure_account_currency(commission_account, payload.settlement_currency)
+        ensure_account_type(commission_account, {AccountType.COMMISSION_INCOME.value}, "Commission income")
+        components.append(
+            ComponentDraft(
+                3,
+                ComponentType.YOUR_COMMISSION.value,
+                payload.commission_amount,
+                payload.settlement_currency,
+                Direction.IN.value,
+                account_id=commission_account.id,
+                affects_profitability=True,
+                profitability_effect_type=ProfitabilityEffectType.INCOME.value,
+                linked_detail_type="commission",
+            )
+        )
+        entries.append(LedgerEntryDraft(commission_account.id, Decimal("0"), payload.commission_amount, payload.settlement_currency, "Included commission"))
+    fx_detail = {
+        "received_amount": payload.gross_amount,
+        "received_currency": payload.received_currency,
+        "settlement_amount": settlement_gross,
+        "settlement_currency": payload.settlement_currency,
+        "stored_rate": payload.original_rate,
+    }
+    return _preview(db, transaction_type=TransactionType.CROSS_CURRENCY_RECEIPT.value, gross_amount=payload.gross_amount, gross_currency=payload.received_currency, components=components, ledger_entries=entries, fx_detail=fx_detail)
+
+
+def build_cross_currency_payment_preview(db: Session, payload: CrossCurrencyPaymentPayload) -> PostingPreview:
+    ensure_user(db, payload.created_by_user_id)
+    ensure_settlement_open(db, payload.settlement_id)
+    ensure_currency(db, payload.payment_currency)
+    ensure_currency(db, payload.settlement_currency)
+    paying = get_account(db, payload.paying_account_id)
+    clearing = get_account(db, payload.clearing_account_id)
+    source_clearing = get_account(db, payload.source_clearing_account_id)
+    target_clearing = get_account(db, payload.target_clearing_account_id)
+    ensure_account_currency(paying, payload.payment_currency)
+    ensure_account_currency(source_clearing, payload.payment_currency)
+    ensure_account_currency(clearing, payload.settlement_currency)
+    ensure_account_currency(target_clearing, payload.settlement_currency)
+    ensure_account_type(paying, MOVEMENT_ACCOUNT_TYPES, "Paying")
+    ensure_account_type(source_clearing, {AccountType.CLEARING.value}, "Source clearing")
+    ensure_account_type(target_clearing, {AccountType.CLEARING.value}, "Target clearing")
+    warning = ensure_sufficient_balance(paying, payload.payment_amount, permission_granted=False)
+    components = [
+        ComponentDraft(
+            1,
+            ComponentType.PRINCIPAL.value,
+            payload.settlement_amount,
+            payload.settlement_currency,
+            Direction.OUT.value,
+            account_id=clearing.id,
+            affects_settlement=payload.settlement_id is not None,
+            settlement_effect_type=SettlementEffectType.PRINCIPAL_OUT.value,
+        )
+    ]
+    entries = [
+        LedgerEntryDraft(source_clearing.id, payload.payment_amount, Decimal("0"), payload.payment_currency, "Payment FX clearing"),
+        LedgerEntryDraft(paying.id, Decimal("0"), payload.payment_amount, payload.payment_currency, "Payment"),
+        LedgerEntryDraft(clearing.id, payload.settlement_amount, Decimal("0"), payload.settlement_currency, "Payment principal"),
+        LedgerEntryDraft(target_clearing.id, Decimal("0"), payload.settlement_amount, payload.settlement_currency, "Payment FX value"),
+    ]
+    fx_detail = {
+        "payment_amount": payload.payment_amount,
+        "payment_currency": payload.payment_currency,
+        "settlement_amount": payload.settlement_amount,
+        "settlement_currency": payload.settlement_currency,
+        "stored_rate": payload.original_rate,
+    }
+    return _preview(db, transaction_type=TransactionType.CROSS_CURRENCY_PAYMENT.value, gross_amount=payload.payment_amount, gross_currency=payload.payment_currency, components=components, ledger_entries=entries, warnings=[warning] if warning else [], fx_detail=fx_detail)
 
 
 def build_agent_settlement_preview(db: Session, payload: AgentSettlementPayload) -> PostingPreview:

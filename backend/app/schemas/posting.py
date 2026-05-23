@@ -115,6 +115,58 @@ class PaymentPayload(BasePostingPayload):
     currency: str
 
 
+class CrossCurrencyReceiptPayload(BasePostingPayload):
+    receiving_account_id: int
+    clearing_account_id: int
+    source_clearing_account_id: int
+    target_clearing_account_id: int
+    gross_amount: Decimal
+    principal_amount: Decimal
+    received_currency: str
+    settlement_currency: str
+    commission_amount: Decimal = Decimal("0")
+    commission_income_account_id: int | None = None
+    base_currency: str
+    original_rate: Decimal
+
+    @model_validator(mode="after")
+    def validate_cross_currency_receipt(self):
+        if self.gross_amount <= 0 or self.principal_amount <= 0:
+            raise ValueError("Receipt amounts must be positive")
+        if self.received_currency == self.settlement_currency:
+            raise ValueError("Use normal receipt when currencies are same")
+        if self.commission_amount < 0:
+            raise ValueError("Commission cannot be negative")
+        if self.commission_amount > 0 and self.commission_income_account_id is None:
+            raise ValueError("Commission income account is required when commission is included")
+        if self.original_rate <= 0:
+            raise ValueError("Exchange rate must be positive")
+        return self
+
+
+class CrossCurrencyPaymentPayload(BasePostingPayload):
+    paying_account_id: int
+    clearing_account_id: int
+    source_clearing_account_id: int
+    target_clearing_account_id: int
+    payment_amount: Decimal
+    settlement_amount: Decimal
+    payment_currency: str
+    settlement_currency: str
+    base_currency: str
+    original_rate: Decimal
+
+    @model_validator(mode="after")
+    def validate_cross_currency_payment(self):
+        if self.payment_amount <= 0 or self.settlement_amount <= 0:
+            raise ValueError("Payment amounts must be positive")
+        if self.payment_currency == self.settlement_currency:
+            raise ValueError("Use normal payment when currencies are same")
+        if self.original_rate <= 0:
+            raise ValueError("Exchange rate must be positive")
+        return self
+
+
 class AgentSettlementPayload(BasePostingPayload):
     paying_account_id: int
     clearing_account_id: int

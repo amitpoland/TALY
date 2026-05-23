@@ -16,6 +16,8 @@ const requiredRoutes = [
   "/transactions/receipt/post",
   "/transactions/agent-settlement/preview",
   "/transactions/agent-settlement/post",
+  "/transactions/cross-currency-receipt/preview",
+  "/transactions/cross-currency-payment/preview",
   "/transactions/fx-conversion/preview",
   "/currencies",
   "/settlements",
@@ -84,6 +86,11 @@ for (const required of ["receiptAmounts", "amount / (1 + rate)", "amount - princ
 for (const required of ["baseValueFromQuotedRate", "amount / quoteRate", "storedOriginalRateFromQuote", "1 / quoteRate", "Rate means 1"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Receipt exchange-rate direction missing ${required}`);
+  }
+}
+for (const required of ["crossCurrencyReceipt", "crossCurrencyPayment", "settlement_currency", "received_currency", "payment_currency", "source_clearing_account_id"]) {
+  if (!transactionSource.includes(required) && !apiSource.includes(required)) {
+    throw new Error(`Cross-currency voucher support missing ${required}`);
   }
 }
 for (const required of ["ensureCommissionIncomeAccount", "COMMISSION-${currency}", "commission_income", "commission_income_account_id: commissionAccountId"]) {

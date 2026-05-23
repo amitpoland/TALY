@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.schemas.posting import (
     AgentSettlementPayload,
+    CrossCurrencyPaymentPayload,
+    CrossCurrencyReceiptPayload,
     ExpensePayload,
     FxConversionPayload,
     OpeningBalancePayload,
@@ -22,6 +24,8 @@ from app.services.posting.builders import (
     build_agent_settlement_preview,
     build_bank_transfer_preview,
     build_cash_handover_preview,
+    build_cross_currency_payment_preview,
+    build_cross_currency_receipt_preview,
     build_expense_preview,
     build_fx_conversion_preview,
     build_opening_balance_preview,
@@ -89,6 +93,30 @@ def preview_payment(payload: PaymentPayload, db: Session = Depends(get_db)):
 def post_payment(request: PostingRequest, db: Session = Depends(get_db)):
     payload = _payload_from_post(request, PaymentPayload)
     preview, transaction, audit_id = posting_service.post_payment(db, payload)
+    return _post_response(preview, transaction, audit_id)
+
+
+@router.post("/cross-currency-receipt/preview", response_model=PostingPreviewRead)
+def preview_cross_currency_receipt(payload: CrossCurrencyReceiptPayload, db: Session = Depends(get_db)):
+    return _preview_response(build_cross_currency_receipt_preview(db, payload))
+
+
+@router.post("/cross-currency-receipt/post", response_model=PostingResultRead, status_code=status.HTTP_201_CREATED)
+def post_cross_currency_receipt(request: PostingRequest, db: Session = Depends(get_db)):
+    payload = _payload_from_post(request, CrossCurrencyReceiptPayload)
+    preview, transaction, audit_id = posting_service.post_cross_currency_receipt(db, payload)
+    return _post_response(preview, transaction, audit_id)
+
+
+@router.post("/cross-currency-payment/preview", response_model=PostingPreviewRead)
+def preview_cross_currency_payment(payload: CrossCurrencyPaymentPayload, db: Session = Depends(get_db)):
+    return _preview_response(build_cross_currency_payment_preview(db, payload))
+
+
+@router.post("/cross-currency-payment/post", response_model=PostingResultRead, status_code=status.HTTP_201_CREATED)
+def post_cross_currency_payment(request: PostingRequest, db: Session = Depends(get_db)):
+    payload = _payload_from_post(request, CrossCurrencyPaymentPayload)
+    preview, transaction, audit_id = posting_service.post_cross_currency_payment(db, payload)
     return _post_response(preview, transaction, audit_id)
 
 

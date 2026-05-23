@@ -229,6 +229,49 @@ def test_payment_posting_updates_settlement_and_account_balances(
     assert balance.json()["balances"]["USD"] == -25
 
 
+def test_cross_currency_receipt_posts_cash_and_client_currency(
+    client: TestClient, db_session: Session
+) -> None:
+    user = create_user(db_session)
+    settlement = create_settlement(db_session)
+    cash_pln = create_account(db_session, "CASH-PLN", "cash", "PLN")
+    clearing_pln = create_account(db_session, "FX-CLEAR-PLN", "clearing", "PLN")
+    clearing_usd = create_account(db_session, "FX-CLEAR-USD", "clearing", "USD")
+    client_usd = create_account(db_session, "CLIENT-USD", "customer_wallet", "USD")
+    commission_usd = create_account(db_session, "COMM-X-USD", "commission_income", "USD")
+
+    payload = {
+        "transaction_date": "2026-05-15",
+        "created_by_user_id": user.id,
+        "settlement_id": settlement.id,
+        "receiving_account_id": cash_pln.id,
+        "clearing_account_id": client_usd.id,
+        "source_clearing_account_id": clearing_pln.id,
+        "target_clearing_account_id": clearing_usd.id,
+        "gross_amount": "3650.00",
+        "principal_amount": "990.00",
+        "commission_amount": "10.00",
+        "commission_income_account_id": commission_usd.id,
+        "received_currency": "PLN",
+        "settlement_currency": "USD",
+        "base_currency": "USD",
+        "original_rate": "0.2739726027",
+    }
+
+    preview = client.post("/transactions/cross-currency-receipt/preview", json=payload)
+    assert preview.status_code == 200, preview.text
+    assert Decimal(preview.json()["settlement_effect"]["USD"]) == Decimal("990.00")
+
+    post(client, "/transactions/cross-currency-receipt/post", payload)
+
+    db_session.refresh(cash_pln)
+    db_session.refresh(client_usd)
+    db_session.refresh(commission_usd)
+    assert cash_pln.current_balance == Decimal("3650.000000")
+    assert client_usd.current_balance == Decimal("-990.000000")
+    assert commission_usd.current_balance == Decimal("10.000000")
+
+
 def test_agent_settlement_posts_principal_and_agent_commission(
     client: TestClient, db_session: Session
 ) -> None:

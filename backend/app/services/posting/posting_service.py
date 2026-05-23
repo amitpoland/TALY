@@ -20,6 +20,8 @@ from app.models.transaction_component import TransactionComponent
 from app.models.common import utcnow
 from app.schemas.posting import (
     AgentSettlementPayload,
+    CrossCurrencyPaymentPayload,
+    CrossCurrencyReceiptPayload,
     ExpensePayload,
     FxConversionPayload,
     OpeningBalancePayload,
@@ -34,6 +36,8 @@ from app.services.posting.builders import (
     build_agent_settlement_preview,
     build_bank_transfer_preview,
     build_cash_handover_preview,
+    build_cross_currency_payment_preview,
+    build_cross_currency_receipt_preview,
     build_expense_preview,
     build_fx_conversion_preview,
     build_opening_balance_preview,
@@ -176,11 +180,12 @@ def _persist_preview(
             original_rate=payload.original_rate,
         )
 
-    if preview.transaction_type == TransactionType.RECEIPT.value and getattr(payload, "original_rate", None) is not None:
+    if preview.transaction_type in {TransactionType.RECEIPT.value, TransactionType.CROSS_CURRENCY_RECEIPT.value} and getattr(payload, "original_rate", None) is not None:
+        lot_currency = getattr(payload, "currency", getattr(payload, "received_currency", None))
         create_exchange_rate_lot(
             db,
             account_id=payload.receiving_account_id,
-            currency=payload.currency,
+            currency=lot_currency,
             base_currency=payload.base_currency,
             source_transaction_id=transaction.id,
             amount=payload.gross_amount,
@@ -263,6 +268,20 @@ def post_receipt(db: Session, payload: ReceiptPayload) -> tuple[PostingPreview, 
 
 def post_payment(db: Session, payload: PaymentPayload) -> tuple[PostingPreview, Transaction, int | None]:
     preview = build_payment_preview(db, payload)
+    transaction, audit_id = _persist_preview(db, preview=preview, payload=payload, created_by_user_id=payload.created_by_user_id, description=payload.description, transaction_date=payload.transaction_date, settlement_id=payload.settlement_id)
+    db.commit()
+    return preview, transaction, audit_id
+
+
+def post_cross_currency_receipt(db: Session, payload: CrossCurrencyReceiptPayload) -> tuple[PostingPreview, Transaction, int | None]:
+    preview = build_cross_currency_receipt_preview(db, payload)
+    transaction, audit_id = _persist_preview(db, preview=preview, payload=payload, created_by_user_id=payload.created_by_user_id, description=payload.description, transaction_date=payload.transaction_date, settlement_id=payload.settlement_id)
+    db.commit()
+    return preview, transaction, audit_id
+
+
+def post_cross_currency_payment(db: Session, payload: CrossCurrencyPaymentPayload) -> tuple[PostingPreview, Transaction, int | None]:
+    preview = build_cross_currency_payment_preview(db, payload)
     transaction, audit_id = _persist_preview(db, preview=preview, payload=payload, created_by_user_id=payload.created_by_user_id, description=payload.description, transaction_date=payload.transaction_date, settlement_id=payload.settlement_id)
     db.commit()
     return preview, transaction, audit_id

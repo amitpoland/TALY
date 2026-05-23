@@ -59,6 +59,8 @@ const routeTitles: Record<TransactionRouteKey, string> = {
   openingBalance: "Opening Balance",
   receipt: "Receive Money",
   payment: "Pay Money",
+  crossCurrencyReceipt: "Receive Money",
+  crossCurrencyPayment: "Pay Money",
   agentSettlement: "Agent Settlement",
   cashHandover: "Cash Handover",
   bankTransfer: "Bank Transfer",
@@ -71,6 +73,8 @@ const routeHelp: Record<TransactionRouteKey, string> = {
   openingBalance: "Set the starting amount for a cash, bank, or client balance.",
   receipt: "Record money received. The system prepares the accounting preview before posting.",
   payment: "Record money paid out. The system prepares the accounting preview before posting.",
+  crossCurrencyReceipt: "Record money received in one currency and client balance in another.",
+  crossCurrencyPayment: "Record money paid in one currency and client balance in another.",
   agentSettlement: "Pay agent/vendor, settle principal, and record agent commission.",
   cashHandover: "Move cash from one place to another.",
   bankTransfer: "Move money between bank accounts.",
@@ -129,6 +133,10 @@ function receiptAmounts(amount: number, amountMode: string, commissionType: stri
     principal: amountMode === "gross" ? amount - commission : amount,
     commission
   };
+}
+
+function splitCommissionAmount(amount: number, amountMode: string, commissionType: string, commissionValue: number) {
+  return receiptAmounts(amount, amountMode, commissionType, commissionValue);
 }
 
 function accountBalance(account?: Account): number {
@@ -388,10 +396,21 @@ function PreviewPanel({
       { label: "Client credited", value: amountWithCurrency(payload?.principal_amount) },
       { label: "Commission earned", value: amountWithCurrency(payload?.commission_amount) }
     );
+  } else if (previewRouteKey === "crossCurrencyReceipt") {
+    summaryRows.push(
+      { label: "You are receiving", value: amountWithCurrency(payload?.gross_amount, String(payload?.received_currency ?? "")) },
+      { label: "Client credited", value: amountWithCurrency(payload?.principal_amount, String(payload?.settlement_currency ?? "")) },
+      { label: "Commission earned", value: amountWithCurrency(payload?.commission_amount, String(payload?.settlement_currency ?? "")) }
+    );
   } else if (previewRouteKey === "payment") {
     summaryRows.push(
       { label: "Money paid from cash/bank", value: amountWithCurrency(payload?.amount) },
       { label: "Client/vendor balance affected", value: amountWithCurrency(payload?.amount) }
+    );
+  } else if (previewRouteKey === "crossCurrencyPayment") {
+    summaryRows.push(
+      { label: "Money paid from cash/bank", value: amountWithCurrency(payload?.payment_amount, String(payload?.payment_currency ?? "")) },
+      { label: "Client/vendor balance affected", value: amountWithCurrency(payload?.settlement_amount, String(payload?.settlement_currency ?? "")) }
     );
   } else if (previewRouteKey === "agentSettlement") {
     summaryRows.push(
@@ -476,6 +495,34 @@ async function createPartyWallet(party: Party, currency: string) {
   });
 }
 
+function hiddenClearingAccount(accounts: Account[], currency: string): Account | undefined {
+  return accounts.find((account) => account.account_type === "clearing" && account.currency === currency && account.account_code === `FX-CLEARING-${currency}` && account.is_active !== false)
+    ?? accounts.find((account) => account.account_type === "clearing" && account.currency === currency && account.is_active !== false);
+}
+
+async function ensureHiddenClearingAccount(lookups: Lookups, currency: string, refreshLookups: () => void): Promise<number | undefined> {
+  const existing = hiddenClearingAccount(lookups.accounts, currency);
+  if (existing) return existing.id;
+  try {
+    const created = await api.createAccount({
+      account_code: `FX-CLEARING-${currency}`,
+      name: `FX Clearing ${currency}`,
+      account_type: "clearing",
+      currency
+    });
+    refreshLookups();
+    return asId(created.id);
+  } catch (err) {
+    const latestAccounts = await api.accounts();
+    const latest = hiddenClearingAccount(latestAccounts as Account[], currency);
+    if (latest) {
+      refreshLookups();
+      return latest.id;
+    }
+    throw err;
+  }
+}
+
 type VoucherProps = {
   lookups: Lookups;
   routeKey: TransactionRouteKey;
@@ -500,21 +547,24 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
   const [walletBusy, setWalletBusy] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
   const receiveAccount = findAccount(lookups.accounts, form.receiveIn);
-  const currency = receiveAccount?.currency ?? form.currency;
+  const moneyCurrency = receiveAccount?.currency ?? form.currency;
   const selectedParty = findParty(lookups.parties, form.party);
+  const clientCurrency = selectedParty?.default_currency ?? moneyCurrency;
+  const isCrossCurrency = moneyCurrency !== clientCurrency;
   const commissionValue = decimal(form.commissionValue);
   const amount = decimal(form.amount);
-  const { gross, principal, commission } = receiptAmounts(amount, form.amountMode, form.commissionType, commissionValue);
   const exchangeRate = decimal(form.exchangeRate);
-  const approxBaseValue = baseValueFromQuotedRate(gross, exchangeRate);
-  const clientBalance = partyWallet(lookups.accounts, selectedParty, currency);
-  const canPreview = Boolean(clientBalance && receiveAccount && principal >= 0 && gross > 0);
+  const clientAmount = isCrossCurrency ? baseValueFromQuotedRate(amount, exchangeRate) : amount;
+  const { gross, principal, commission } = receiptAmounts(clientAmount, form.amountMode, form.commissionType, commissionValue);
+  const approxBaseValue = baseValueFromQuotedRate(amount, exchangeRate);
+  const clientBalance = partyWallet(lookups.accounts, selectedParty, clientCurrency);
+  const canPreview = Boolean(clientBalance && receiveAccount && principal >= 0 && amount > 0 && (!isCrossCurrency || exchangeRate > 0));
 
   async function quickCreateBalance() {
     if (!selectedParty) return;
     setWalletBusy(true);
     try {
-      await createPartyWallet(selectedParty, currency);
+      await createPartyWallet(selectedParty, clientCurrency);
       refreshLookups();
     } finally {
       setWalletBusy(false);
@@ -527,9 +577,40 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
     setSetupError(null);
     let commissionAccountId: number | undefined;
     try {
-      commissionAccountId = commission > 0 ? await ensureCommissionIncomeAccount(lookups, currency, refreshLookups) : undefined;
+      commissionAccountId = commission > 0 ? await ensureCommissionIncomeAccount(lookups, clientCurrency, refreshLookups) : undefined;
     } catch (err) {
       setSetupError((err as Error).message);
+      return;
+    }
+    if (isCrossCurrency) {
+      let sourceClearingId: number | undefined;
+      let targetClearingId: number | undefined;
+      try {
+        sourceClearingId = await ensureHiddenClearingAccount(lookups, moneyCurrency, refreshLookups);
+        targetClearingId = await ensureHiddenClearingAccount(lookups, clientCurrency, refreshLookups);
+      } catch (err) {
+        setSetupError((err as Error).message);
+        return;
+      }
+      submit({
+        transaction_date: new Date().toISOString().slice(0, 10),
+        created_by_user_id: defaultUserId(lookups.users),
+        settlement_id: autoSettlementId(lookups.settlements),
+        __routeKey: "crossCurrencyReceipt",
+        receiving_account_id: asId(form.receiveIn),
+        clearing_account_id: clientBalance?.id,
+        source_clearing_account_id: sourceClearingId,
+        target_clearing_account_id: targetClearingId,
+        gross_amount: money(amount),
+        principal_amount: money(principal),
+        commission_amount: money(commission),
+        commission_income_account_id: commissionAccountId,
+        received_currency: moneyCurrency,
+        settlement_currency: clientCurrency,
+        base_currency: clientCurrency,
+        original_rate: storedOriginalRateFromQuote(exchangeRate),
+        description: form.reference || undefined
+      });
       return;
     }
     submit({
@@ -538,13 +619,12 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
       settlement_id: autoSettlementId(lookups.settlements),
       receiving_account_id: asId(form.receiveIn),
       clearing_account_id: clientBalance?.id,
-      gross_amount: money(gross),
+      gross_amount: money(isCrossCurrency ? amount : gross),
       principal_amount: money(principal),
       commission_amount: money(commission),
       commission_income_account_id: commissionAccountId,
-      currency,
-      base_currency: DEFAULT_BASE_CURRENCY,
-      original_rate: currency !== DEFAULT_BASE_CURRENCY ? storedOriginalRateFromQuote(exchangeRate) : undefined,
+      currency: clientCurrency,
+      base_currency: clientCurrency,
       description: form.reference || undefined
     });
   }
@@ -559,26 +639,26 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
         const selected = findAccount(lookups.accounts, receiveIn);
         setForm({ ...form, receiveIn, currency: selected?.currency ?? form.currency });
       }, "Receive In", ["cash", "bank"])}
+      {isCrossCurrency && <label><span>Exchange Rate</span><input required value={form.exchangeRate} onChange={(event) => setForm({ ...form, exchangeRate: event.target.value })} /></label>}
       <label><span>Amount Type</span><select value={form.amountMode} onChange={(event) => setForm({ ...form, amountMode: event.target.value })}><option value="net">Net Received</option><option value="gross">Gross Received</option></select></label>
       <label><span>Amount</span><input required value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
       <label><span>Commission</span><select value={form.commissionType} onChange={(event) => setForm({ ...form, commissionType: event.target.value })}><option value="none">none</option><option value="percentage">%</option><option value="fixed">fixed</option></select></label>
       <label><span>Commission Value</span><input value={form.commissionValue} onChange={(event) => setForm({ ...form, commissionValue: event.target.value })} /></label>
       <label><span>Reference</span><input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></label>
       <div className="voucher-plain-summary">
-        <span>You are receiving {money(gross)} {currency}</span>
-        <span>Client credited {money(principal)} {currency}</span>
-        <span>Commission earned {money(commission)} {currency}</span>
+        <span>You are receiving {money(isCrossCurrency ? amount : gross)} {moneyCurrency}</span>
+        {isCrossCurrency && <span>Rate 1 {clientCurrency} = {form.exchangeRate || "0"} {moneyCurrency}</span>}
+        <span>Client credited {money(principal)} {clientCurrency}</span>
+        <span>Commission earned {money(commission)} {clientCurrency}</span>
         {receiveAccount && <span>Money received in {accountLabel(receiveAccount)}</span>}
         <span>Client balance {clientBalance ? accountLabel(clientBalance) : "Missing"}</span>
       </div>
       {setupError && <p className="form-note danger-note">{setupError}</p>}
-      {!clientBalance && <MissingBalanceNotice party={selectedParty} currency={currency} onCreate={quickCreateBalance} busy={walletBusy} />}
-      {currency !== DEFAULT_BASE_CURRENCY && advancedBlock(
+      {!clientBalance && <MissingBalanceNotice party={selectedParty} currency={clientCurrency} onCreate={quickCreateBalance} busy={walletBusy} />}
+      {isCrossCurrency && advancedBlock(
         <>
-          <label><span>Exchange Rate</span><input value={form.exchangeRate} onChange={(event) => setForm({ ...form, exchangeRate: event.target.value })} /></label>
           <div className="voucher-plain-summary">
-            <span>Rate means 1 {DEFAULT_BASE_CURRENCY} = {form.exchangeRate || "0"} {currency}</span>
-            <span>Approx. {DEFAULT_BASE_CURRENCY} value {money(approxBaseValue)} {DEFAULT_BASE_CURRENCY}</span>
+            <span>Client amount {money(approxBaseValue)} {clientCurrency}</span>
           </div>
         </>
       )}
@@ -647,7 +727,7 @@ function PaymentVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
 }
 
 function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
-  const [form, setForm] = useState({ client: "", agent: "", payFrom: "", principalAmount: "", agentCommission: "", reference: "" });
+  const [form, setForm] = useState({ client: "", agent: "", payFrom: "", amountMode: "net", amount: "", commissionType: "fixed", agentCommission: "", reference: "" });
   const [walletBusy, setWalletBusy] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
   const selectedClient = findParty(lookups.parties, form.client);
@@ -655,9 +735,11 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
   const payAccount = findAccount(lookups.accounts, form.payFrom);
   const currency = payAccount?.currency ?? selectedClient?.default_currency ?? "USD";
   const clientBalance = partyWallet(lookups.accounts, selectedClient, currency);
-  const principal = decimal(form.principalAmount);
-  const agentCommission = decimal(form.agentCommission);
-  const paidToAgent = principal + agentCommission;
+  const amount = decimal(form.amount);
+  const split = splitCommissionAmount(amount, form.amountMode, form.commissionType, decimal(form.agentCommission));
+  const principal = split.principal;
+  const agentCommission = split.commission;
+  const paidToAgent = split.gross;
   const settlementIdValue = autoSettlementId(lookups.settlements);
   const currencyMismatch = Boolean(selectedClient?.default_currency && payAccount && selectedClient.default_currency !== payAccount.currency);
   const cashWarning = cashShortageMessage(payAccount, paidToAgent);
@@ -674,7 +756,7 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
             : !settlementIdValue
               ? "One open settlement is required for Agent Settlement."
               : principal <= 0
-                ? "Enter Principal Amount."
+                ? "Enter Amount."
                 : agentCommission < 0
                   ? "Agent Commission cannot be negative."
                   : cashWarning;
@@ -727,8 +809,10 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
       {partySelect(lookups.parties, form.client, (client) => updateForm({ client }), true, "Client")}
       {partySelect(lookups.parties, form.agent, (agent) => updateForm({ agent }), true, "Agent / Vendor")}
       {accountSelect(lookups.accounts, form.payFrom, (payFrom) => updateForm({ payFrom }), "Pay From", ["cash", "bank"])}
-      <label><span>Principal Amount</span><input required value={form.principalAmount} onChange={(event) => updateForm({ principalAmount: event.target.value })} /></label>
-      <label><span>Agent Commission</span><input value={form.agentCommission} onChange={(event) => updateForm({ agentCommission: event.target.value })} /></label>
+      <label><span>Amount Type</span><select value={form.amountMode} onChange={(event) => updateForm({ amountMode: event.target.value })}><option value="net">Principal Amount</option><option value="gross">Paid to Agent</option></select></label>
+      <label><span>Amount</span><input required value={form.amount} onChange={(event) => updateForm({ amount: event.target.value })} /></label>
+      <label><span>Agent Commission</span><select value={form.commissionType} onChange={(event) => updateForm({ commissionType: event.target.value })}><option value="fixed">fixed</option><option value="percentage">%</option><option value="none">none</option></select></label>
+      <label><span>Commission Value</span><input value={form.agentCommission} onChange={(event) => updateForm({ agentCommission: event.target.value })} /></label>
       <label><span>Reference</span><input value={form.reference} onChange={(event) => updateForm({ reference: event.target.value })} /></label>
       <div className="voucher-plain-summary">
         <span>Delivered by agent {money(principal)} {currency}</span>
@@ -757,6 +841,7 @@ const emptyCashBankEntryForm = {
   amountMode: "net",
   commissionType: "none",
   commissionValue: "",
+  exchangeRate: "",
   reference: ""
 };
 
@@ -765,24 +850,30 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
   const [walletBusy, setWalletBusy] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
   const cashBankAccount = findAccount(lookups.accounts, form.cashBank);
-  const currency = cashBankAccount?.currency ?? form.currency;
+  const moneyCurrency = cashBankAccount?.currency ?? form.currency;
   const selectedParty = findParty(lookups.parties, form.party);
-  const clientBalance = partyWallet(lookups.accounts, selectedParty, currency);
+  const clientCurrency = selectedParty?.default_currency ?? moneyCurrency;
+  const isReceipt = form.entryType === "receipt";
+  const isCrossCurrency = moneyCurrency !== clientCurrency;
+  const exchangeRate = decimal(form.exchangeRate);
+  const convertedClientAmount = isCrossCurrency ? baseValueFromQuotedRate(decimal(form.amount), exchangeRate) : decimal(form.amount);
+  const clientBalance = partyWallet(lookups.accounts, selectedParty, clientCurrency);
   const clientBalances = selectedParty
     ? lookups.accounts.filter((account) => account.party_id === selectedParty.id && ["customer_wallet", "agent_wallet", "fx_dealer_wallet", "clearing"].includes(account.account_type))
     : [];
   const amount = decimal(form.amount);
   const commissionValue = decimal(form.commissionValue);
-  const isReceipt = form.entryType === "receipt";
-  const receipt = isReceipt ? receiptAmounts(amount, form.amountMode, form.commissionType, commissionValue) : { gross: amount, principal: amount, commission: 0 };
+  const receipt = isReceipt ? receiptAmounts(convertedClientAmount, form.amountMode, form.commissionType, commissionValue) : { gross: amount, principal: amount, commission: 0 };
   const { gross, principal, commission } = receipt;
   const cashWarning = !isReceipt ? cashShortageMessage(cashBankAccount, amount) : null;
   const previewBlockedReason = !cashBankAccount
     ? "Select Cash/Bank."
     : !selectedParty
       ? "Select Party."
+      : isCrossCurrency && exchangeRate <= 0
+        ? `Enter Exchange Rate. Rate means 1 ${clientCurrency} = ? ${moneyCurrency}.`
       : !clientBalance
-        ? `Create ${currency} Client Balance for ${selectedParty.name}.`
+        ? `Create ${clientCurrency} Client Balance for ${selectedParty.name}.`
         : amount <= 0
           ? "Enter Amount."
           : principal < 0
@@ -805,7 +896,7 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
     if (!selectedParty) return;
     setWalletBusy(true);
     try {
-      await createPartyWallet(selectedParty, currency);
+      await createPartyWallet(selectedParty, clientCurrency);
       refreshLookups();
     } finally {
       setWalletBusy(false);
@@ -818,7 +909,7 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
     setSetupError(null);
     let commissionAccountId: number | undefined;
     try {
-      commissionAccountId = isReceipt && commission > 0 ? await ensureCommissionIncomeAccount(lookups, currency, refreshLookups) : undefined;
+      commissionAccountId = isReceipt && commission > 0 ? await ensureCommissionIncomeAccount(lookups, clientCurrency, refreshLookups) : undefined;
     } catch (err) {
       setSetupError((err as Error).message);
       return;
@@ -828,10 +919,37 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
       created_by_user_id: defaultUserId(lookups.users),
       settlement_id: autoSettlementId(lookups.settlements),
       clearing_account_id: clientBalance?.id,
-      currency,
+      currency: isCrossCurrency ? clientCurrency : moneyCurrency,
       description: form.reference || undefined
     };
     if (isReceipt) {
+      if (isCrossCurrency) {
+        let sourceClearingId: number | undefined;
+        let targetClearingId: number | undefined;
+        try {
+          sourceClearingId = await ensureHiddenClearingAccount(lookups, moneyCurrency, refreshLookups);
+          targetClearingId = await ensureHiddenClearingAccount(lookups, clientCurrency, refreshLookups);
+        } catch (err) {
+          setSetupError((err as Error).message);
+          return;
+        }
+        submit({
+          ...common,
+          __routeKey: "crossCurrencyReceipt",
+          receiving_account_id: asId(form.cashBank),
+          source_clearing_account_id: sourceClearingId,
+          target_clearing_account_id: targetClearingId,
+          gross_amount: money(amount),
+          principal_amount: money(principal),
+          commission_amount: money(commission),
+          commission_income_account_id: commissionAccountId,
+          received_currency: moneyCurrency,
+          settlement_currency: clientCurrency,
+          base_currency: clientCurrency,
+          original_rate: storedOriginalRateFromQuote(exchangeRate)
+        });
+        return;
+      }
       submit({
         ...common,
         __routeKey: "receipt",
@@ -841,6 +959,31 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
         commission_amount: money(commission),
         commission_income_account_id: commissionAccountId,
         base_currency: DEFAULT_BASE_CURRENCY
+      });
+      return;
+    }
+    if (isCrossCurrency) {
+      let sourceClearingId: number | undefined;
+      let targetClearingId: number | undefined;
+      try {
+        sourceClearingId = await ensureHiddenClearingAccount(lookups, moneyCurrency, refreshLookups);
+        targetClearingId = await ensureHiddenClearingAccount(lookups, clientCurrency, refreshLookups);
+      } catch (err) {
+        setSetupError((err as Error).message);
+        return;
+      }
+      submit({
+        ...common,
+        __routeKey: "crossCurrencyPayment",
+        paying_account_id: asId(form.cashBank),
+        source_clearing_account_id: sourceClearingId,
+        target_clearing_account_id: targetClearingId,
+        payment_amount: money(amount),
+        settlement_amount: money(convertedClientAmount),
+        payment_currency: moneyCurrency,
+        settlement_currency: clientCurrency,
+        base_currency: clientCurrency,
+        original_rate: storedOriginalRateFromQuote(exchangeRate)
       });
       return;
     }
@@ -862,15 +1005,17 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
       {partySelect(lookups.parties, form.party, (party) => updateForm({ party }), true, "Party")}
       <label><span>Date</span><input type="date" value={new Date().toISOString().slice(0, 10)} readOnly /></label>
       <label><span>Amount</span><input required value={form.amount} onChange={(event) => updateForm({ amount: event.target.value })} /></label>
+      {isCrossCurrency && <label><span>Exchange Rate</span><input required value={form.exchangeRate} onChange={(event) => updateForm({ exchangeRate: event.target.value })} /></label>}
       {isReceipt && <label><span>Amount Type</span><select value={form.amountMode} onChange={(event) => updateForm({ amountMode: event.target.value })}><option value="net">Net Received</option><option value="gross">Gross Received</option></select></label>}
       {isReceipt && <label><span>Commission</span><select value={form.commissionType} onChange={(event) => updateForm({ commissionType: event.target.value })}><option value="none">none</option><option value="percentage">%</option><option value="fixed">fixed</option></select></label>}
       {isReceipt && <label><span>Commission Value</span><input value={form.commissionValue} onChange={(event) => updateForm({ commissionValue: event.target.value })} /></label>}
       <label><span>Reference</span><input value={form.reference} onChange={(event) => updateForm({ reference: event.target.value })} /></label>
       <div className="voucher-plain-summary">
-        <span>{accountLabel(cashBankAccount ?? ({ name: "Cash/Bank", currency } as Account))} {isReceipt ? "+" : "-"}{money(isReceipt ? gross : amount)} {currency}</span>
-        {cashBankAccount && <span>Available {money(accountBalance(cashBankAccount))} {currency}</span>}
-        <span>{selectedParty?.name ?? "Party"} balance {isReceipt ? "+" : "-"}{money(isReceipt ? principal : amount)} {currency}</span>
-        {isReceipt && commission > 0 && <span>Commission +{money(commission)} {currency}</span>}
+        <span>{accountLabel(cashBankAccount ?? ({ name: "Cash/Bank", currency: moneyCurrency } as Account))} {isReceipt ? "+" : "-"}{money(amount)} {moneyCurrency}</span>
+        {cashBankAccount && <span>Available {money(accountBalance(cashBankAccount))} {moneyCurrency}</span>}
+        {isCrossCurrency && <span>Rate 1 {clientCurrency} = {form.exchangeRate || "0"} {moneyCurrency}</span>}
+        <span>{selectedParty?.name ?? "Party"} balance {isReceipt ? "+" : "-"}{money(isReceipt ? principal : convertedClientAmount)} {clientCurrency}</span>
+        {isReceipt && commission > 0 && <span>Commission +{money(commission)} {clientCurrency}</span>}
       </div>
       {clientBalances.length > 0 && (
         <div className="client-currency-strip">
@@ -879,7 +1024,7 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
       )}
       {setupError && <p className="form-note danger-note">{setupError}</p>}
       {cashWarning && <p className="form-note danger-note">{cashWarning}</p>}
-      {!clientBalance && <MissingBalanceNotice party={selectedParty} currency={currency} onCreate={quickCreateBalance} busy={walletBusy} />}
+      {!clientBalance && <MissingBalanceNotice party={selectedParty} currency={clientCurrency} onCreate={quickCreateBalance} busy={walletBusy} />}
       <div className="voucher-action-row">
         <button type="submit" className="primary-action" disabled={busy || !canPreview}>Preview Voucher</button>
         <button type="button" className="secondary-action" onClick={resetPreview}>Edit</button>

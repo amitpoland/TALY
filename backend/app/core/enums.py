@@ -34,6 +34,8 @@ class TransactionType(StrEnum):
     OPENING_BALANCE = "opening_balance"
     RECEIPT = "receipt"
     PAYMENT = "payment"
+    CROSS_CURRENCY_RECEIPT = "cross_currency_receipt"
+    CROSS_CURRENCY_PAYMENT = "cross_currency_payment"
     CASH_HANDOVER = "cash_handover"
     BANK_TRANSFER = "bank_transfer"
     CURRENCY_EXCHANGE = "currency_exchange"
