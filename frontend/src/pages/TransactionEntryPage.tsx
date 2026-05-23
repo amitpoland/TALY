@@ -105,6 +105,10 @@ function money(value: number): string {
   return value.toFixed(2);
 }
 
+function todayDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function preciseRate(value: number): string {
   return value.toFixed(10).replace(/0+$/, "").replace(/\.$/, "");
 }
@@ -567,6 +571,34 @@ async function ensureHiddenClearingAccount(lookups: Lookups, currency: string, r
   }
 }
 
+function openingSourceAccount(accounts: Account[], currency: string): Account | undefined {
+  return accounts.find((account) => account.account_type === "owner_equity" && account.currency === currency && account.account_code === `OPENING-SOURCE-${currency}` && account.is_active !== false)
+    ?? accounts.find((account) => account.account_type === "owner_equity" && account.currency === currency && account.is_active !== false);
+}
+
+async function ensureOpeningSourceAccount(lookups: Lookups, currency: string, refreshLookups: () => void): Promise<number | undefined> {
+  const existing = openingSourceAccount(lookups.accounts, currency);
+  if (existing) return existing.id;
+  try {
+    const created = await api.createAccount({
+      account_code: `OPENING-SOURCE-${currency}`,
+      name: `Opening Balance Source ${currency}`,
+      account_type: "owner_equity",
+      currency
+    });
+    refreshLookups();
+    return asId(created.id);
+  } catch (err) {
+    const latestAccounts = await api.accounts();
+    const latest = openingSourceAccount(latestAccounts as Account[], currency);
+    if (latest) {
+      refreshLookups();
+      return latest.id;
+    }
+    throw err;
+  }
+}
+
 type VoucherProps = {
   lookups: Lookups;
   routeKey: TransactionRouteKey;
@@ -578,6 +610,7 @@ type VoucherProps = {
 
 function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
   const [form, setForm] = useState({
+    date: todayDate(),
     party: "",
     receiveIn: "",
     currency: "USD",
@@ -642,7 +675,7 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
         return;
       }
       submit({
-        transaction_date: new Date().toISOString().slice(0, 10),
+        transaction_date: form.date,
         created_by_user_id: defaultUserId(lookups.users),
         settlement_id: autoSettlementId(lookups.settlements),
         __routeKey: "crossCurrencyReceipt",
@@ -663,7 +696,7 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
       return;
     }
     submit({
-      transaction_date: new Date().toISOString().slice(0, 10),
+      transaction_date: form.date,
       created_by_user_id: defaultUserId(lookups.users),
       settlement_id: autoSettlementId(lookups.settlements),
       receiving_account_id: asId(form.receiveIn),
@@ -688,6 +721,7 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
         const selected = findAccount(lookups.accounts, receiveIn);
         setForm({ ...form, receiveIn, currency: selected?.currency ?? form.currency });
       }, "Receive In", ["cash", "bank"])}
+      <label><span>Date</span><input type="date" required value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
       {isCrossCurrency && (
         <CrossCurrencyRateBox
           moneyCurrency={moneyCurrency}
@@ -727,7 +761,7 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
 }
 
 function PaymentVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
-  const [form, setForm] = useState({ party: "", payFrom: "", currency: "USD", amount: "", reference: "" });
+  const [form, setForm] = useState({ date: todayDate(), party: "", payFrom: "", currency: "USD", amount: "", reference: "" });
   const selectedParty = findParty(lookups.parties, form.party);
   const payAccount = findAccount(lookups.accounts, form.payFrom);
   const currency = payAccount?.currency ?? form.currency;
@@ -752,7 +786,7 @@ function PaymentVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
     event.preventDefault();
     if (!canPreview) return;
     submit({
-      transaction_date: new Date().toISOString().slice(0, 10),
+      transaction_date: form.date,
       created_by_user_id: defaultUserId(lookups.users),
       settlement_id: autoSettlementId(lookups.settlements),
       paying_account_id: asId(form.payFrom),
@@ -770,6 +804,7 @@ function PaymentVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
         const selected = findAccount(lookups.accounts, payFrom);
         setForm({ ...form, payFrom, currency: selected?.currency ?? form.currency });
       }, "Pay From", ["cash", "bank"])}
+      <label><span>Date</span><input type="date" required value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
       <label><span>Amount</span><input required value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
       <label><span>Reference</span><input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></label>
       <div className="voucher-plain-summary">
@@ -786,7 +821,7 @@ function PaymentVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
 }
 
 function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
-  const [form, setForm] = useState({ client: "", agent: "", payFrom: "", amountMode: "net", amount: "", commissionType: "fixed", agentCommission: "", reference: "" });
+  const [form, setForm] = useState({ date: todayDate(), client: "", agent: "", payFrom: "", amountMode: "net", amount: "", commissionType: "fixed", agentCommission: "", reference: "" });
   const [walletBusy, setWalletBusy] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
   const selectedClient = findParty(lookups.parties, form.client);
@@ -849,7 +884,7 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
       return;
     }
     submit({
-      transaction_date: new Date().toISOString().slice(0, 10),
+      transaction_date: form.date,
       created_by_user_id: defaultUserId(lookups.users),
       settlement_id: settlementIdValue,
       paying_account_id: asId(form.payFrom),
@@ -868,6 +903,7 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
       {partySelect(lookups.parties, form.client, (client) => updateForm({ client }), true, "Client")}
       {partySelect(lookups.parties, form.agent, (agent) => updateForm({ agent }), true, "Agent / Vendor")}
       {accountSelect(lookups.accounts, form.payFrom, (payFrom) => updateForm({ payFrom }), "Pay From", ["cash", "bank"])}
+      <label><span>Date</span><input type="date" required value={form.date} onChange={(event) => updateForm({ date: event.target.value })} /></label>
       <label><span>Amount Type</span><select value={form.amountMode} onChange={(event) => updateForm({ amountMode: event.target.value })}><option value="net">Principal Amount</option><option value="gross">Paid to Agent</option></select></label>
       <label><span>Amount</span><input required value={form.amount} onChange={(event) => updateForm({ amount: event.target.value })} /></label>
       <label><span>Agent Commission</span><select value={form.commissionType} onChange={(event) => updateForm({ commissionType: event.target.value })}><option value="fixed">fixed</option><option value="percentage">%</option><option value="none">none</option></select></label>
@@ -892,6 +928,7 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
 }
 
 const emptyCashBankEntryForm = {
+  date: todayDate(),
   entryType: "receipt",
   cashBank: "",
   party: "",
@@ -979,7 +1016,7 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
       return;
     }
     const common = {
-      transaction_date: new Date().toISOString().slice(0, 10),
+      transaction_date: form.date,
       created_by_user_id: defaultUserId(lookups.users),
       settlement_id: autoSettlementId(lookups.settlements),
       clearing_account_id: clientBalance?.id,
@@ -1067,7 +1104,7 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
       }, "Cash/Bank", ["cash", "bank"])}
       <label><span>Entry Type</span><select value={form.entryType} onChange={(event) => updateForm({ entryType: event.target.value })}><option value="receipt">Receipt</option><option value="payment">Payment</option></select></label>
       {partySelect(lookups.parties, form.party, (party) => updateForm({ party }), true, "Party")}
-      <label><span>Date</span><input type="date" value={new Date().toISOString().slice(0, 10)} readOnly /></label>
+      <label><span>Date</span><input type="date" required value={form.date} onChange={(event) => updateForm({ date: event.target.value })} /></label>
       <label><span>{isReceipt ? "Amount Received" : "Amount Paid"}</span><input required value={form.amount} onChange={(event) => updateForm({ amount: event.target.value })} /></label>
       {isCrossCurrency && (
         <CrossCurrencyRateBox
@@ -1112,7 +1149,7 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
 function TransferVoucher({ lookups, routeKey, submit, busy }: VoucherProps) {
   const isBank = routeKey === "bankTransfer";
   const accountTypes = isBank ? ["bank"] : ["cash"];
-  const [form, setForm] = useState({ from: "", to: "", currency: "USD", amount: "", reference: "" });
+  const [form, setForm] = useState({ date: todayDate(), from: "", to: "", currency: "USD", amount: "", reference: "" });
   const fromAccount = findAccount(lookups.accounts, form.from);
   const amount = decimal(form.amount);
   const cashWarning = cashShortageMessage(fromAccount, amount);
@@ -1121,7 +1158,7 @@ function TransferVoucher({ lookups, routeKey, submit, busy }: VoucherProps) {
     event.preventDefault();
     if (cashWarning) return;
     submit({
-      transaction_date: new Date().toISOString().slice(0, 10),
+      transaction_date: form.date,
       created_by_user_id: defaultUserId(lookups.users),
       settlement_id: autoSettlementId(lookups.settlements),
       from_account_id: asId(form.from),
@@ -1139,6 +1176,7 @@ function TransferVoucher({ lookups, routeKey, submit, busy }: VoucherProps) {
         setForm({ ...form, from, currency: selected?.currency ?? form.currency });
       }, isBank ? "Transfer From" : "Hand Over From", accountTypes)}
       {accountSelect(lookups.accounts, form.to, (to) => setForm({ ...form, to }), isBank ? "Transfer To" : "Hand Over To", accountTypes, form.currency)}
+      <label><span>Date</span><input type="date" required value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
       <label><span>Amount</span><input required value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
       <label><span>Reference</span><input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></label>
       {fromAccount && <div className="voucher-plain-summary"><span>Available {money(accountBalance(fromAccount))} {form.currency}</span></div>}
@@ -1149,7 +1187,7 @@ function TransferVoucher({ lookups, routeKey, submit, busy }: VoucherProps) {
 }
 
 function ExpenseVoucher({ lookups, submit, busy }: VoucherProps) {
-  const [form, setForm] = useState({ paidFrom: "", expense: "", currency: "USD", amount: "", expenseType: "other", affectsSettlement: false, reference: "" });
+  const [form, setForm] = useState({ date: todayDate(), paidFrom: "", expense: "", currency: "USD", amount: "", expenseType: "other", affectsSettlement: false, reference: "" });
   const paidFromAccount = findAccount(lookups.accounts, form.paidFrom);
   const amount = decimal(form.amount);
   const cashWarning = cashShortageMessage(paidFromAccount, amount);
@@ -1158,7 +1196,7 @@ function ExpenseVoucher({ lookups, submit, busy }: VoucherProps) {
     event.preventDefault();
     if (cashWarning) return;
     submit({
-      transaction_date: new Date().toISOString().slice(0, 10),
+      transaction_date: form.date,
       created_by_user_id: defaultUserId(lookups.users),
       settlement_id: autoSettlementId(lookups.settlements),
       payment_account_id: asId(form.paidFrom),
@@ -1178,6 +1216,7 @@ function ExpenseVoucher({ lookups, submit, busy }: VoucherProps) {
         setForm({ ...form, paidFrom, currency: selected?.currency ?? form.currency });
       }, "Paid From", ["cash", "bank"])}
       {accountSelect(lookups.accounts, form.expense, (expense) => setForm({ ...form, expense }), "Expense Type", ["expense", "bank_charge_expense"], form.currency)}
+      <label><span>Date</span><input type="date" required value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
       <label><span>Amount</span><input required value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
       <label><span>Category</span><input value={form.expenseType} onChange={(event) => setForm({ ...form, expenseType: event.target.value })} /></label>
       <label className="checkbox-line"><input type="checkbox" checked={form.affectsSettlement} onChange={(event) => setForm({ ...form, affectsSettlement: event.target.checked })} /> <span>Charge to client</span></label>
@@ -1190,7 +1229,7 @@ function ExpenseVoucher({ lookups, submit, busy }: VoucherProps) {
 }
 
 function FxVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
-  const [form, setForm] = useState({ party: "", fromCurrency: "EUR", toCurrency: "USD", fromAmount: "", toAmount: "", fxCharge: "0", chargeAccount: "", reference: "" });
+  const [form, setForm] = useState({ date: todayDate(), party: "", fromCurrency: "EUR", toCurrency: "USD", fromAmount: "", toAmount: "", fxCharge: "0", chargeAccount: "", reference: "" });
   const [walletBusy, setWalletBusy] = useState<"from" | "to" | null>(null);
   const selectedParty = findParty(lookups.parties, form.party);
   const fromWallet = partyWallet(lookups.accounts, selectedParty, form.fromCurrency);
@@ -1213,7 +1252,7 @@ function FxVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
     event.preventDefault();
     if (!canPreview) return;
     submit({
-      transaction_date: new Date().toISOString().slice(0, 10),
+      transaction_date: form.date,
       created_by_user_id: defaultUserId(lookups.users),
       settlement_id: autoSettlementId(lookups.settlements),
       from_account_id: fromWallet?.id,
@@ -1238,6 +1277,7 @@ function FxVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
       {partySelect(lookups.parties, form.party, (party) => setForm({ ...form, party }), true, "Client")}
       {currencySelect(lookups.currencies, form.fromCurrency, (fromCurrency) => setForm({ ...form, fromCurrency }), "From")}
       {currencySelect(lookups.currencies, form.toCurrency, (toCurrency) => setForm({ ...form, toCurrency }), "To")}
+      <label><span>Date</span><input type="date" required value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
       <div className="voucher-plain-summary"><span>From {fromWallet ? accountLabel(fromWallet) : "Missing Client Balance"}</span><span>To {toWallet ? accountLabel(toWallet) : "Missing Client Balance"}</span></div>
       {!fromWallet && <MissingBalanceNotice party={selectedParty} currency={form.fromCurrency} onCreate={() => quickCreateBalance(form.fromCurrency, "from")} busy={walletBusy === "from"} />}
       {!toWallet && <MissingBalanceNotice party={selectedParty} currency={form.toCurrency} onCreate={() => quickCreateBalance(form.toCurrency, "to")} busy={walletBusy === "to"} />}
@@ -1256,20 +1296,46 @@ function FxVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
   );
 }
 
-function OpeningBalanceVoucher({ lookups, submit, busy }: VoucherProps) {
-  const [form, setForm] = useState({ account: "", equity: "", currency: "USD", amount: "", exchangeRate: "" });
+function OpeningBalanceVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
+  const [form, setForm] = useState({ date: todayDate(), account: "", equity: "", currency: "USD", amount: "", exchangeRate: "", sourceNote: "" });
+  const [setupError, setSetupError] = useState<string | null>(null);
+  const sourceAccount = findAccount(lookups.accounts, form.equity) ?? openingSourceAccount(lookups.accounts, form.currency);
+  const canPreview = Boolean(form.account && decimal(form.amount) > 0);
 
-  function onSubmit(event: FormEvent) {
+  async function createOpeningSource() {
+    setSetupError(null);
+    try {
+      const id = await ensureOpeningSourceAccount(lookups, form.currency, refreshLookups);
+      if (id) setForm((current) => ({ ...current, equity: String(id) }));
+    } catch (err) {
+      setSetupError((err as Error).message);
+    }
+  }
+
+  async function onSubmit(event: FormEvent) {
     event.preventDefault();
+    if (!canPreview) return;
+    setSetupError(null);
+    let equityAccountId = asId(form.equity) ?? sourceAccount?.id;
+    if (!equityAccountId) {
+      try {
+        equityAccountId = await ensureOpeningSourceAccount(lookups, form.currency, refreshLookups);
+        if (equityAccountId) setForm((current) => ({ ...current, equity: String(equityAccountId) }));
+      } catch (err) {
+        setSetupError((err as Error).message);
+        return;
+      }
+    }
     submit({
-      transaction_date: new Date().toISOString().slice(0, 10),
+      transaction_date: form.date,
       created_by_user_id: defaultUserId(lookups.users),
       account_id: asId(form.account),
-      equity_account_id: asId(form.equity),
+      equity_account_id: equityAccountId,
       amount: form.amount,
       currency: form.currency,
       base_currency: DEFAULT_BASE_CURRENCY,
-      original_rate: form.exchangeRate || undefined
+      original_rate: form.exchangeRate || undefined,
+      description: form.sourceNote || undefined
     });
   }
 
@@ -1277,16 +1343,27 @@ function OpeningBalanceVoucher({ lookups, submit, busy }: VoucherProps) {
     <form className="entry-form voucher-form" onSubmit={onSubmit}>
       {accountSelect(lookups.accounts, form.account, (account) => {
         const selected = findAccount(lookups.accounts, account);
-        setForm({ ...form, account, currency: selected?.currency ?? form.currency });
+        const currency = selected?.currency ?? form.currency;
+        const source = openingSourceAccount(lookups.accounts, currency);
+        setForm({ ...form, account, currency, equity: source ? String(source.id) : "" });
       }, "Balance For", ["cash", "bank", "customer_wallet", "agent_wallet", "fx_dealer_wallet", "commission_income", "commission_payable", "expense", "bank_charge_expense", "fx_gain_loss", "clearing", "suspense"])}
       {accountSelect(lookups.accounts, form.equity, (equity) => setForm({ ...form, equity }), "Funding Source", ["owner_equity"], form.currency)}
+      {!sourceAccount && (
+        <div className="state-block warning">
+          <span>No Opening Balance Source exists for {form.currency}.</span>
+          <button type="button" onClick={createOpeningSource}>Create Source</button>
+        </div>
+      )}
+      <label><span>Date</span><input type="date" required value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
       <label><span>Amount</span><input required value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
+      <label><span>Source / Note</span><input placeholder="Opening cash, bank start, previous balance" value={form.sourceNote} onChange={(event) => setForm({ ...form, sourceNote: event.target.value })} /></label>
       {form.currency !== DEFAULT_BASE_CURRENCY && advancedBlock(
         <>
           <label><span>Exchange Rate</span><input value={form.exchangeRate} onChange={(event) => setForm({ ...form, exchangeRate: event.target.value })} /></label>
         </>
       )}
-      <button type="submit" disabled={busy}>Preview</button>
+      {setupError && <p className="form-note danger-note">{setupError}</p>}
+      <button type="submit" disabled={busy || !canPreview}>Preview</button>
     </form>
   );
 }
@@ -1383,7 +1460,7 @@ export default function TransactionEntryPage({ routeKey }: { routeKey: Transacti
       <header className="page-header voucher-page-header">
         <div><h1>{title}</h1></div>
         <div className="voucher-meta-bar">
-          <span>Date: <strong>{new Date().toISOString().slice(0, 10)}</strong></span>
+          <span>Date can be changed for back-dated entries</span>
           {routeShortcut[routeKey] && <span>Shortcut: <strong>{routeShortcut[routeKey]}</strong></span>}
         </div>
       </header>

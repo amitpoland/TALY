@@ -73,9 +73,19 @@ for (const forbidden of ["User ID", "Receiving Account ID", "Clearing Account ID
     throw new Error(`Transaction UI exposes internal label: ${forbidden}`);
   }
 }
-for (const required of ["Cash / Bank Entry", "Cash/Bank", "Entry Type", "Party", "Receipt", "Payment", "Delete Draft", "client-currency-strip", "Receive Money", "Client", "Receive In", "Amount Type", "Net Received", "Gross Received", "Amount", "Commission", "Commission Value", "Reference", "Preview Voucher", "previewBlockedReason"]) {
+for (const required of ["Cash / Bank Entry", "Cash/Bank", "Entry Type", "Party", "Date", "Receipt", "Payment", "Delete Draft", "client-currency-strip", "Receive Money", "Client", "Receive In", "Amount Type", "Net Received", "Gross Received", "Amount", "Commission", "Commission Value", "Reference", "Preview Voucher", "previewBlockedReason"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Receipt voucher missing ${required}`);
+  }
+}
+for (const required of ["todayDate()", "type=\"date\"", "transaction_date: form.date", "Date can be changed for back-dated entries"]) {
+  if (!transactionSource.includes(required)) {
+    throw new Error(`Back-dated voucher entry support missing ${required}`);
+  }
+}
+for (const forbidden of ["readOnly /></label>", "transaction_date: new Date().toISOString().slice(0, 10)"]) {
+  if (transactionSource.includes(forbidden)) {
+    throw new Error(`Back-dated voucher entry still blocked by ${forbidden}`);
   }
 }
 for (const required of ["receiptAmounts", "amount / (1 + rate)", "amount - principal"]) {
@@ -116,6 +126,11 @@ for (const required of ["Agent Settlement", "Agent / Vendor", "Principal Amount"
 for (const required of ["cashShortageMessage", "Add opening balance or choose Bank", "Available {money(accountBalance"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Cash negative balance guard missing ${required}`);
+  }
+}
+for (const required of ["Opening Balance Source", "Source / Note", "ensureOpeningSourceAccount", "Create Source"]) {
+  if (!transactionSource.includes(required)) {
+    throw new Error(`Opening balance source support missing ${required}`);
   }
 }
 for (const required of ['data-searchable="true"', "onKeyDown", "ctrlKey", "metaKey", "api.previewTransaction(targetRoute, cleanPayload)", "api.postTransaction(targetRoute, cleanPayload)"]) {
