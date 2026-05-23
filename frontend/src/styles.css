@@ -527,6 +527,72 @@ kbd {
   max-width: 900px;
 }
 
+.report-tabs {
+  max-width: 1180px;
+}
+
+.report-filter-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+  align-items: end;
+  background: white;
+  border: 1px solid #d8e0e8;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 14px;
+}
+
+.report-filter-panel label {
+  display: grid;
+  gap: 4px;
+}
+
+.report-filter-panel label span {
+  color: #445160;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.report-filter-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.report-total-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.report-total-card {
+  display: grid;
+  gap: 3px;
+  background: white;
+  border: 1px solid #d8e0e8;
+  border-radius: 8px;
+  padding: 10px 12px;
+  min-width: 0;
+}
+
+.report-total-card span {
+  color: #1f6b63;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.report-total-card strong {
+  font-size: 19px;
+  color: #18202b;
+}
+
+.report-total-card small {
+  color: #5d6875;
+  text-transform: capitalize;
+}
+
 .table-wrap {
   overflow: auto;
   background: white;

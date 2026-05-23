@@ -1,7 +1,7 @@
 import { FormEvent, KeyboardEvent, ReactNode, RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
 
-import { ApiRecord, api, PreviewResponse, TransactionRouteKey, transactionRoutes } from "../api/client";
+import { ApiRecord, api, operatorTransactionRouteKeys, PreviewResponse, TransactionRouteKey, transactionRoutes } from "../api/client";
 import DataTable from "../components/DataTable";
 import { ErrorState, LoadingState } from "../components/StateBlocks";
 import { useAsync } from "../hooks/useAsync";
@@ -242,10 +242,6 @@ function options(accounts: Account[], types: string[], currency?: string) {
   return accounts.filter((account) => types.includes(account.account_type) && (!currency || account.currency === currency));
 }
 
-function firstId(accounts: Account[], types: string[], currency?: string): number | undefined {
-  return options(accounts, types, currency)[0]?.id;
-}
-
 function commissionIncomeAccount(accounts: Account[], currency: string): Account | undefined {
   return accounts.find((account) => account.account_type === "commission_income" && account.currency === currency && account.is_active !== false);
 }
@@ -277,6 +273,65 @@ async function ensureCommissionIncomeAccount(lookups: Lookups, currency: string,
 function agentCommissionExpenseAccount(accounts: Account[], currency: string): Account | undefined {
   return accounts.find((account) => account.account_type === "expense" && account.currency === currency && account.account_code === `AGENT-COMMISSION-${currency}` && account.is_active !== false)
     ?? accounts.find((account) => account.account_type === "expense" && account.currency === currency && account.name.toLowerCase().includes("agent commission") && account.is_active !== false);
+}
+
+function expenseAccount(accounts: Account[], currency: string, type: "expense" | "bank_charge_expense" = "expense"): Account | undefined {
+  const code = type === "bank_charge_expense" ? `BANK-CHARGE-${currency}` : `EXPENSE-${currency}`;
+  return accounts.find((account) => account.account_type === type && account.currency === currency && account.account_code === code && account.is_active !== false)
+    ?? accounts.find((account) => account.account_type === type && account.currency === currency && account.is_active !== false);
+}
+
+async function ensureExpenseAccount(lookups: Lookups, currency: string, refreshLookups: () => void, type: "expense" | "bank_charge_expense" = "expense"): Promise<number | undefined> {
+  const existing = expenseAccount(lookups.accounts, currency, type);
+  if (existing) return existing.id;
+  const accountCode = type === "bank_charge_expense" ? `BANK-CHARGE-${currency}` : `EXPENSE-${currency}`;
+  const name = type === "bank_charge_expense" ? `Bank Charges ${currency}` : `General Expense ${currency}`;
+  try {
+    const created = await api.createAccount({
+      account_code: accountCode,
+      name,
+      account_type: type,
+      currency
+    });
+    refreshLookups();
+    return asId(created.id);
+  } catch (err) {
+    const latestAccounts = await api.accounts();
+    const latest = expenseAccount(latestAccounts as Account[], currency, type);
+    if (latest) {
+      refreshLookups();
+      return latest.id;
+    }
+    throw err;
+  }
+}
+
+function fxGainLossAccount(accounts: Account[], currency: string): Account | undefined {
+  return accounts.find((account) => account.account_type === "fx_gain_loss" && account.currency === currency && account.account_code === `FX-GAIN-LOSS-${currency}` && account.is_active !== false)
+    ?? accounts.find((account) => account.account_type === "fx_gain_loss" && account.currency === currency && account.is_active !== false);
+}
+
+async function ensureFxGainLossAccount(lookups: Lookups, currency: string, refreshLookups: () => void): Promise<number | undefined> {
+  const existing = fxGainLossAccount(lookups.accounts, currency);
+  if (existing) return existing.id;
+  try {
+    const created = await api.createAccount({
+      account_code: `FX-GAIN-LOSS-${currency}`,
+      name: `Exchange Difference ${currency}`,
+      account_type: "fx_gain_loss",
+      currency
+    });
+    refreshLookups();
+    return asId(created.id);
+  } catch (err) {
+    const latestAccounts = await api.accounts();
+    const latest = fxGainLossAccount(latestAccounts as Account[], currency);
+    if (latest) {
+      refreshLookups();
+      return latest.id;
+    }
+    throw err;
+  }
 }
 
 async function ensureAgentCommissionExpenseAccount(lookups: Lookups, currency: string, refreshLookups: () => void): Promise<number | undefined> {
@@ -1186,21 +1241,44 @@ function TransferVoucher({ lookups, routeKey, submit, busy }: VoucherProps) {
   );
 }
 
-function ExpenseVoucher({ lookups, submit, busy }: VoucherProps) {
+function ExpenseVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
   const [form, setForm] = useState({ date: todayDate(), paidFrom: "", expense: "", currency: "USD", amount: "", expenseType: "other", affectsSettlement: false, reference: "" });
+  const [setupError, setSetupError] = useState<string | null>(null);
   const paidFromAccount = findAccount(lookups.accounts, form.paidFrom);
   const amount = decimal(form.amount);
   const cashWarning = cashShortageMessage(paidFromAccount, amount);
+  const selectedExpense = findAccount(lookups.accounts, form.expense) ?? expenseAccount(lookups.accounts, form.currency);
 
-  function onSubmit(event: FormEvent) {
+  async function quickCreateExpense() {
+    setSetupError(null);
+    try {
+      const id = await ensureExpenseAccount(lookups, form.currency, refreshLookups);
+      if (id) setForm((current) => ({ ...current, expense: String(id) }));
+    } catch (err) {
+      setSetupError((err as Error).message);
+    }
+  }
+
+  async function onSubmit(event: FormEvent) {
     event.preventDefault();
-    if (cashWarning) return;
+    if (cashWarning || amount <= 0 || !paidFromAccount) return;
+    setSetupError(null);
+    let expenseAccountId = asId(form.expense) ?? selectedExpense?.id;
+    if (!expenseAccountId) {
+      try {
+        expenseAccountId = await ensureExpenseAccount(lookups, form.currency, refreshLookups);
+        if (expenseAccountId) setForm((current) => ({ ...current, expense: String(expenseAccountId) }));
+      } catch (err) {
+        setSetupError((err as Error).message);
+        return;
+      }
+    }
     submit({
       transaction_date: form.date,
       created_by_user_id: defaultUserId(lookups.users),
       settlement_id: autoSettlementId(lookups.settlements),
       payment_account_id: asId(form.paidFrom),
-      expense_account_id: asId(form.expense),
+      expense_account_id: expenseAccountId,
       amount: form.amount,
       currency: form.currency,
       expense_type: form.expenseType || "other",
@@ -1216,14 +1294,21 @@ function ExpenseVoucher({ lookups, submit, busy }: VoucherProps) {
         setForm({ ...form, paidFrom, currency: selected?.currency ?? form.currency });
       }, "Paid From", ["cash", "bank"])}
       {accountSelect(lookups.accounts, form.expense, (expense) => setForm({ ...form, expense }), "Expense Type", ["expense", "bank_charge_expense"], form.currency)}
+      {!selectedExpense && (
+        <div className="state-block warning">
+          <span>No expense type exists for {form.currency}.</span>
+          <button type="button" onClick={quickCreateExpense}>Create Expense Type</button>
+        </div>
+      )}
       <label><span>Date</span><input type="date" required value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
       <label><span>Amount</span><input required value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
       <label><span>Category</span><input value={form.expenseType} onChange={(event) => setForm({ ...form, expenseType: event.target.value })} /></label>
       <label className="checkbox-line"><input type="checkbox" checked={form.affectsSettlement} onChange={(event) => setForm({ ...form, affectsSettlement: event.target.checked })} /> <span>Charge to client</span></label>
       <label><span>Reference</span><input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></label>
       {paidFromAccount && <div className="voucher-plain-summary"><span>Available {money(accountBalance(paidFromAccount))} {form.currency}</span></div>}
+      {setupError && <p className="form-note danger-note">{setupError}</p>}
       {cashWarning && <p className="form-note danger-note">{cashWarning}</p>}
-      <button type="submit" disabled={busy || Boolean(cashWarning)}>Preview</button>
+      <button type="submit" disabled={busy || Boolean(cashWarning) || amount <= 0 || !paidFromAccount}>Preview</button>
     </form>
   );
 }
@@ -1231,11 +1316,12 @@ function ExpenseVoucher({ lookups, submit, busy }: VoucherProps) {
 function FxVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
   const [form, setForm] = useState({ date: todayDate(), party: "", fromCurrency: "EUR", toCurrency: "USD", fromAmount: "", toAmount: "", fxCharge: "0", chargeAccount: "", reference: "" });
   const [walletBusy, setWalletBusy] = useState<"from" | "to" | null>(null);
+  const [setupError, setSetupError] = useState<string | null>(null);
   const selectedParty = findParty(lookups.parties, form.party);
   const fromWallet = partyWallet(lookups.accounts, selectedParty, form.fromCurrency);
   const toWallet = partyWallet(lookups.accounts, selectedParty, form.toCurrency);
   const actualRate = decimal(form.fromAmount) ? decimal(form.toAmount) / decimal(form.fromAmount) : 0;
-  const canPreview = Boolean(selectedParty && fromWallet && toWallet && firstId(lookups.accounts, ["clearing"], form.fromCurrency) && firstId(lookups.accounts, ["clearing"], form.toCurrency) && firstId(lookups.accounts, ["fx_gain_loss"], form.toCurrency));
+  const canPreview = Boolean(selectedParty && fromWallet && toWallet && decimal(form.fromAmount) > 0 && decimal(form.toAmount) > 0);
 
   async function quickCreateBalance(currency: string, target: "from" | "to") {
     if (!selectedParty) return;
@@ -1251,25 +1337,42 @@ function FxVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
   function onSubmit(event: FormEvent) {
     event.preventDefault();
     if (!canPreview) return;
-    submit({
-      transaction_date: form.date,
-      created_by_user_id: defaultUserId(lookups.users),
-      settlement_id: autoSettlementId(lookups.settlements),
-      from_account_id: fromWallet?.id,
-      to_account_id: toWallet?.id,
-      source_clearing_account_id: firstId(lookups.accounts, ["clearing"], form.fromCurrency),
-      target_clearing_account_id: firstId(lookups.accounts, ["clearing"], form.toCurrency),
-      fx_gain_loss_account_id: firstId(lookups.accounts, ["fx_gain_loss"], form.toCurrency),
-      fx_charge_account_id: form.fxCharge !== "0" ? asId(form.chargeAccount) : undefined,
-      from_amount: form.fromAmount,
-      to_amount: form.toAmount,
-      from_currency: form.fromCurrency,
-      to_currency: form.toCurrency,
-      base_currency: form.toCurrency,
-      costing_method: "fifo",
-      fx_charge: form.fxCharge || "0",
-      description: form.reference || undefined
-    });
+    setSetupError(null);
+    void (async () => {
+      try {
+        const sourceClearingId = await ensureHiddenClearingAccount(lookups, form.fromCurrency, refreshLookups);
+        const targetClearingId = await ensureHiddenClearingAccount(lookups, form.toCurrency, refreshLookups);
+        const fxGainLossAccountId = await ensureFxGainLossAccount(lookups, form.toCurrency, refreshLookups);
+        const fxChargeAccountId = decimal(form.fxCharge) > 0
+          ? (asId(form.chargeAccount) ?? await ensureExpenseAccount(lookups, form.toCurrency, refreshLookups, "bank_charge_expense"))
+          : undefined;
+        if (!sourceClearingId || !targetClearingId || !fxGainLossAccountId) {
+          setSetupError("Exchange setup is missing. Please try Preview again after setup finishes.");
+          return;
+        }
+        submit({
+          transaction_date: form.date,
+          created_by_user_id: defaultUserId(lookups.users),
+          settlement_id: autoSettlementId(lookups.settlements),
+          from_account_id: fromWallet?.id,
+          to_account_id: toWallet?.id,
+          source_clearing_account_id: sourceClearingId,
+          target_clearing_account_id: targetClearingId,
+          fx_gain_loss_account_id: fxGainLossAccountId,
+          fx_charge_account_id: fxChargeAccountId,
+          from_amount: form.fromAmount,
+          to_amount: form.toAmount,
+          from_currency: form.fromCurrency,
+          to_currency: form.toCurrency,
+          base_currency: form.toCurrency,
+          costing_method: "fifo",
+          fx_charge: form.fxCharge || "0",
+          description: form.reference || undefined
+        });
+      } catch (err) {
+        setSetupError((err as Error).message);
+      }
+    })();
   }
 
   return (
@@ -1291,6 +1394,7 @@ function FxVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
           {accountSelect(lookups.accounts, form.chargeAccount, (chargeAccount) => setForm({ ...form, chargeAccount }), "Fee Type", ["expense", "bank_charge_expense"], form.toCurrency, false)}
         </>
       )}
+      {setupError && <p className="form-note danger-note">{setupError}</p>}
       <button type="submit" disabled={busy || !canPreview}>Preview</button>
     </form>
   );
@@ -1465,7 +1569,7 @@ export default function TransactionEntryPage({ routeKey }: { routeKey: Transacti
         </div>
       </header>
       <div className="tabs voucher-type-strip">
-        {Object.entries(transactionRoutes).map(([key]) => <NavLink key={key} to={`/transactions/${key}`}>{routeTitles[key as TransactionRouteKey]}</NavLink>)}
+        {operatorTransactionRouteKeys.map((key) => <NavLink key={key} to={`/transactions/${key}`}>{routeTitles[key]}</NavLink>)}
       </div>
       {loading && <LoadingState label="Loading entry lists" />}
       <div className="voucher-workbench">

@@ -45,8 +45,10 @@ const mainSource = readFileSync(new URL("../src/main.tsx", import.meta.url), "ut
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const dashboardSource = readFileSync(new URL("../src/pages/DashboardPage.tsx", import.meta.url), "utf8");
 const transactionSource = readFileSync(new URL("../src/pages/TransactionEntryPage.tsx", import.meta.url), "utf8");
+const reportsSource = readFileSync(new URL("../src/pages/ReportsPage.tsx", import.meta.url), "utf8");
 const partiesSource = readFileSync(new URL("../src/pages/PartiesPage.tsx", import.meta.url), "utf8");
 const accountsSource = readFileSync(new URL("../src/pages/AccountsPage.tsx", import.meta.url), "utf8");
+const styleSource = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 const viteSource = readFileSync(new URL("../vite.config.ts", import.meta.url), "utf8");
 const envExampleSource = readFileSync(new URL("../.env.example", import.meta.url), "utf8");
 const envDevelopmentSource = readFileSync(new URL("../.env.development", import.meta.url), "utf8");
@@ -98,6 +100,14 @@ for (const required of ["CrossCurrencyRateBox", "Currency exchange required", "b
     throw new Error(`Receipt exchange-rate direction missing ${required}`);
   }
 }
+for (const required of ["operatorTransactionRouteKeys", "cashBankEntry", "agentSettlement", "fxConversion"]) {
+  if (!transactionSource.includes(required) && !apiSource.includes(required)) {
+    throw new Error(`Operator voucher tab setup missing ${required}`);
+  }
+}
+if (transactionSource.includes("Object.entries(transactionRoutes).map")) {
+  throw new Error("Voucher tabs still expose internal cross-currency routes");
+}
 for (const required of ["crossCurrencyReceipt", "crossCurrencyPayment", "settlement_currency", "received_currency", "payment_currency", "source_clearing_account_id"]) {
   if (!transactionSource.includes(required) && !apiSource.includes(required)) {
     throw new Error(`Cross-currency voucher support missing ${required}`);
@@ -131,6 +141,16 @@ for (const required of ["cashShortageMessage", "Add opening balance or choose Ba
 for (const required of ["Opening Balance Source", "Source / Note", "ensureOpeningSourceAccount", "Create Source"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Opening balance source support missing ${required}`);
+  }
+}
+for (const required of ["report-filter-panel", "report-total-card", "All parties", "All accounts", "All settlements", "TotalsCards"]) {
+  if (!reportsSource.includes(required) && !styleSource.includes(required)) {
+    throw new Error(`Report UX polish missing ${required}`);
+  }
+}
+for (const forbidden of ["JSON.stringify(data.totals)", "placeholder=\"Party ID\"", "placeholder=\"Account ID\"", "placeholder=\"Settlement ID\""]) {
+  if (reportsSource.includes(forbidden)) {
+    throw new Error(`Report UI still exposes raw ID/JSON control: ${forbidden}`);
   }
 }
 for (const required of ['data-searchable="true"', "onKeyDown", "ctrlKey", "metaKey", "api.previewTransaction(targetRoute, cleanPayload)", "api.postTransaction(targetRoute, cleanPayload)"]) {

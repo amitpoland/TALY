@@ -87,6 +87,18 @@ export const transactionRoutes = {
 
 export type TransactionRouteKey = keyof typeof transactionRoutes;
 
+export const operatorTransactionRouteKeys: TransactionRouteKey[] = [
+  "cashBankEntry",
+  "openingBalance",
+  "receipt",
+  "payment",
+  "agentSettlement",
+  "cashHandover",
+  "bankTransfer",
+  "expense",
+  "fxConversion"
+];
+
 export const reportRoutes = [
   { id: "day-book", label: "Day Book", path: "/reports/day-book" },
   { id: "cash", label: "Cash", path: "/reports/cash" },
