@@ -205,7 +205,26 @@ function settlementId(settlement: Settlement): number | undefined {
 
 function autoSettlementId(settlements: Settlement[]): number | undefined {
   const active = settlements.filter((item) => ["open", "reopened"].includes(String(item.status).toLowerCase()));
-  return active.length === 1 ? settlementId(active[0]) : undefined;
+  return active.length >= 1 ? settlementId(active[0]) : undefined;
+}
+
+async function ensureOpenSettlement(
+  lookups: Lookups,
+  refreshLookups: () => void,
+  party: Party | undefined,
+  currency: string
+): Promise<number | undefined> {
+  const existing = autoSettlementId(lookups.settlements);
+  if (existing) return existing;
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  const created = await api.createSettlement({
+    settlement_no: `AUTO-${stamp}`,
+    title: party ? `${party.name} settlement` : "Auto settlement",
+    primary_party_id: party?.id ?? null,
+    base_currency: currency
+  });
+  refreshLookups();
+  return asId(created.id);
 }
 
 function cleanAccountName(name: string): string {
@@ -920,9 +939,7 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
           ? `Enter Exchange Rate. Rate means 1 ${settlementCurrency} = ? ${paymentCurrency}.`
           : !clientBalance
             ? `Create ${settlementCurrency} Client Balance for ${selectedClient.name}.`
-            : !settlementIdValue
-              ? "One open settlement is required for Agent Settlement."
-              : principal <= 0
+            : principal <= 0
                 ? "Enter Amount."
                 : agentCommission < 0
                   ? "Agent Commission cannot be negative."
@@ -954,6 +971,13 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
     if (!canPreview) return;
     setSetupError(null);
     let expenseAccountId: number | undefined;
+    let activeSettlementId = settlementIdValue;
+    try {
+      activeSettlementId = await ensureOpenSettlement(lookups, refreshLookups, selectedClient, settlementCurrency);
+    } catch (err) {
+      setSetupError((err as Error).message);
+      return;
+    }
     try {
       expenseAccountId = await ensureAgentCommissionExpenseAccount(lookups, paymentCurrency, refreshLookups);
     } catch (err) {
@@ -974,7 +998,7 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
     submit({
       transaction_date: form.date,
       created_by_user_id: defaultUserId(lookups.users),
-      settlement_id: settlementIdValue,
+      settlement_id: activeSettlementId,
       paying_account_id: asId(form.payFrom),
       clearing_account_id: clientBalance?.id,
       agent_commission_expense_account_id: expenseAccountId,
@@ -1021,6 +1045,7 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
         {isCrossCurrency && <span>Rate 1 {settlementCurrency} = {form.exchangeRate || "0"} {paymentCurrency}</span>}
         <span>Your profit = earlier commission - {money(agentCommission)} {paymentCurrency}</span>
         {payAccount && <span>Available {money(accountBalance(payAccount))} {paymentCurrency}</span>}
+        {!settlementIdValue && <span>New settlement will be created automatically</span>}
       </div>
       {setupError && <p className="form-note danger-note">{setupError}</p>}
       {cashWarning && <p className="form-note danger-note">{cashWarning}</p>}

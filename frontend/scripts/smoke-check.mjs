@@ -143,6 +143,14 @@ for (const required of ["Agent Settlement", "Agent / Vendor", "Principal Amount"
     throw new Error(`Agent Settlement voucher missing ${required}`);
   }
 }
+for (const required of ["ensureOpenSettlement", "api.createSettlement", "New settlement will be created automatically"]) {
+  if (!transactionSource.includes(required)) {
+    throw new Error(`Agent Settlement auto-settlement support missing ${required}`);
+  }
+}
+if (transactionSource.includes("One open settlement is required for Agent Settlement")) {
+  throw new Error("Agent Settlement still blocks when no open settlement exists");
+}
 for (const required of ["payment_principal_amount", "payment_currency", "settlement_currency", "original_rate", "CrossCurrencyRateBox"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Cross-currency Agent Settlement UI missing ${required}`);
