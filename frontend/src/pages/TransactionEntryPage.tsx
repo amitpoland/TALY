@@ -59,6 +59,7 @@ const routeTitles: Record<TransactionRouteKey, string> = {
   openingBalance: "Opening Balance",
   receipt: "Receive Money",
   payment: "Pay Money",
+  agentSettlement: "Agent Settlement",
   cashHandover: "Cash Handover",
   bankTransfer: "Bank Transfer",
   expense: "Expense",
@@ -70,6 +71,7 @@ const routeHelp: Record<TransactionRouteKey, string> = {
   openingBalance: "Set the starting amount for a cash, bank, or client balance.",
   receipt: "Record money received. The system prepares the accounting preview before posting.",
   payment: "Record money paid out. The system prepares the accounting preview before posting.",
+  agentSettlement: "Pay agent/vendor, settle principal, and record agent commission.",
   cashHandover: "Move cash from one place to another.",
   bankTransfer: "Move money between bank accounts.",
   expense: "Record fees, charges, and operating costs.",
@@ -196,6 +198,35 @@ async function ensureCommissionIncomeAccount(lookups: Lookups, currency: string,
   } catch (err) {
     const latestAccounts = await api.accounts();
     const latest = commissionIncomeAccount(latestAccounts as Account[], currency);
+    if (latest) {
+      refreshLookups();
+      return latest.id;
+    }
+    throw err;
+  }
+}
+
+function agentCommissionExpenseAccount(accounts: Account[], currency: string): Account | undefined {
+  return accounts.find((account) => account.account_type === "expense" && account.currency === currency && account.account_code === `AGENT-COMMISSION-${currency}` && account.is_active !== false)
+    ?? accounts.find((account) => account.account_type === "expense" && account.currency === currency && account.name.toLowerCase().includes("agent commission") && account.is_active !== false);
+}
+
+async function ensureAgentCommissionExpenseAccount(lookups: Lookups, currency: string, refreshLookups: () => void): Promise<number | undefined> {
+  const existing = agentCommissionExpenseAccount(lookups.accounts, currency);
+  if (existing) return existing.id;
+  const accountCode = `AGENT-COMMISSION-${currency}`;
+  try {
+    const created = await api.createAccount({
+      account_code: accountCode,
+      name: `Agent Commission ${currency}`,
+      account_type: "expense",
+      currency
+    });
+    refreshLookups();
+    return asId(created.id);
+  } catch (err) {
+    const latestAccounts = await api.accounts();
+    const latest = agentCommissionExpenseAccount(latestAccounts as Account[], currency);
     if (latest) {
       refreshLookups();
       return latest.id;
@@ -349,6 +380,13 @@ function PreviewPanel({
     summaryRows.push(
       { label: "Money paid from cash/bank", value: amountWithCurrency(payload?.amount) },
       { label: "Client/vendor balance affected", value: amountWithCurrency(payload?.amount) }
+    );
+  } else if (previewRouteKey === "agentSettlement") {
+    summaryRows.push(
+      { label: "Principal delivered", value: amountWithCurrency(payload?.principal_amount) },
+      { label: "Agent commission", value: amountWithCurrency(payload?.agent_commission_amount) },
+      { label: "Paid to agent", value: amountWithCurrency(preview.gross_amount) },
+      { label: "Your profit", value: `Earlier commission - ${amountWithCurrency(payload?.agent_commission_amount)}` }
     );
   } else if (previewRouteKey === "fxConversion") {
     const fxDifference = component("fx_gain") ?? component("fx_loss");
@@ -587,6 +625,108 @@ function PaymentVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
       {cashWarning && <p className="form-note danger-note">{cashWarning}</p>}
       {!clientBalance && <MissingBalanceNotice party={selectedParty} currency={currency} onCreate={quickCreateBalance} busy={walletBusy} />}
       <button type="submit" disabled={busy || !canPreview}>Preview</button>
+    </form>
+  );
+}
+
+function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
+  const [form, setForm] = useState({ client: "", agent: "", payFrom: "", principalAmount: "", agentCommission: "", reference: "" });
+  const [walletBusy, setWalletBusy] = useState(false);
+  const [setupError, setSetupError] = useState<string | null>(null);
+  const selectedClient = findParty(lookups.parties, form.client);
+  const selectedAgent = findParty(lookups.parties, form.agent);
+  const payAccount = findAccount(lookups.accounts, form.payFrom);
+  const currency = payAccount?.currency ?? selectedClient?.default_currency ?? "USD";
+  const clientBalance = partyWallet(lookups.accounts, selectedClient, currency);
+  const principal = decimal(form.principalAmount);
+  const agentCommission = decimal(form.agentCommission);
+  const paidToAgent = principal + agentCommission;
+  const settlementIdValue = autoSettlementId(lookups.settlements);
+  const currencyMismatch = Boolean(selectedClient?.default_currency && payAccount && selectedClient.default_currency !== payAccount.currency);
+  const cashWarning = cashShortageMessage(payAccount, paidToAgent);
+  const previewBlockedReason = !selectedClient
+    ? "Select Client."
+    : !selectedAgent
+      ? "Select Agent / Vendor."
+      : !payAccount
+        ? "Select Pay From."
+        : currencyMismatch
+          ? "Use Currency Exchange first. Multi-currency Agent Settlement will come later."
+          : !clientBalance
+            ? `Create ${currency} Client Balance for ${selectedClient.name}.`
+            : !settlementIdValue
+              ? "One open settlement is required for Agent Settlement."
+              : principal <= 0
+                ? "Enter Principal Amount."
+                : agentCommission < 0
+                  ? "Agent Commission cannot be negative."
+                  : cashWarning;
+  const canPreview = !previewBlockedReason;
+
+  function updateForm(next: Partial<typeof form>) {
+    setForm((current) => ({ ...current, ...next }));
+    setSetupError(null);
+  }
+
+  async function quickCreateBalance() {
+    if (!selectedClient) return;
+    setWalletBusy(true);
+    try {
+      await createPartyWallet(selectedClient, currency);
+      refreshLookups();
+    } finally {
+      setWalletBusy(false);
+    }
+  }
+
+  async function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (!canPreview) return;
+    setSetupError(null);
+    let expenseAccountId: number | undefined;
+    try {
+      expenseAccountId = await ensureAgentCommissionExpenseAccount(lookups, currency, refreshLookups);
+    } catch (err) {
+      setSetupError((err as Error).message);
+      return;
+    }
+    submit({
+      transaction_date: new Date().toISOString().slice(0, 10),
+      created_by_user_id: defaultUserId(lookups.users),
+      settlement_id: settlementIdValue,
+      paying_account_id: asId(form.payFrom),
+      clearing_account_id: clientBalance?.id,
+      agent_commission_expense_account_id: expenseAccountId,
+      agent_party_id: asId(form.agent),
+      principal_amount: money(principal),
+      agent_commission_amount: money(agentCommission),
+      currency,
+      description: form.reference || undefined
+    });
+  }
+
+  return (
+    <form className="entry-form voucher-form" onSubmit={onSubmit}>
+      {partySelect(lookups.parties, form.client, (client) => updateForm({ client }), true, "Client")}
+      {partySelect(lookups.parties, form.agent, (agent) => updateForm({ agent }), true, "Agent / Vendor")}
+      {accountSelect(lookups.accounts, form.payFrom, (payFrom) => updateForm({ payFrom }), "Pay From", ["cash", "bank"])}
+      <label><span>Principal Amount</span><input required value={form.principalAmount} onChange={(event) => updateForm({ principalAmount: event.target.value })} /></label>
+      <label><span>Agent Commission</span><input value={form.agentCommission} onChange={(event) => updateForm({ agentCommission: event.target.value })} /></label>
+      <label><span>Reference</span><input value={form.reference} onChange={(event) => updateForm({ reference: event.target.value })} /></label>
+      <div className="voucher-plain-summary">
+        <span>Delivered by agent {money(principal)} {currency}</span>
+        <span>Agent commission {money(agentCommission)} {currency}</span>
+        <span>Paid to agent {money(paidToAgent)} {currency}</span>
+        <span>Your profit = earlier commission - {money(agentCommission)} {currency}</span>
+        {payAccount && <span>Available {money(accountBalance(payAccount))} {currency}</span>}
+      </div>
+      {setupError && <p className="form-note danger-note">{setupError}</p>}
+      {cashWarning && <p className="form-note danger-note">{cashWarning}</p>}
+      {!clientBalance && !currencyMismatch && <MissingBalanceNotice party={selectedClient} currency={currency} onCreate={quickCreateBalance} busy={walletBusy} />}
+      <div className="voucher-action-row">
+        <button type="submit" className="primary-action" disabled={busy || !canPreview}>Preview Voucher</button>
+        {!canPreview && <span className="action-hint">{previewBlockedReason}</span>}
+      </div>
     </form>
   );
 }
@@ -922,6 +1062,7 @@ function VoucherForm(props: VoucherProps) {
   if (props.routeKey === "cashBankEntry") return <CashBankEntryVoucher {...props} />;
   if (props.routeKey === "receipt") return <ReceiptVoucher {...props} />;
   if (props.routeKey === "payment") return <PaymentVoucher {...props} />;
+  if (props.routeKey === "agentSettlement") return <AgentSettlementVoucher {...props} />;
   if (props.routeKey === "cashHandover" || props.routeKey === "bankTransfer") return <TransferVoucher {...props} />;
   if (props.routeKey === "expense") return <ExpenseVoucher {...props} />;
   if (props.routeKey === "fxConversion") return <FxVoucher {...props} />;

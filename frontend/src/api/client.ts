@@ -76,6 +76,7 @@ export const transactionRoutes = {
   openingBalance: { label: "Opening Balance", preview: "/transactions/opening-balance/preview", post: "/transactions/opening-balance/post" },
   receipt: { label: "Receipt", preview: "/transactions/receipt/preview", post: "/transactions/receipt/post" },
   payment: { label: "Payment", preview: "/transactions/payment/preview", post: "/transactions/payment/post" },
+  agentSettlement: { label: "Agent Settlement", preview: "/transactions/agent-settlement/preview", post: "/transactions/agent-settlement/post" },
   cashHandover: { label: "Cash Handover", preview: "/transactions/cash-handover/preview", post: "/transactions/cash-handover/post" },
   bankTransfer: { label: "Bank Transfer", preview: "/transactions/bank-transfer/preview", post: "/transactions/bank-transfer/post" },
   expense: { label: "Expense", preview: "/transactions/expense/preview", post: "/transactions/expense/post" },

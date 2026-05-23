@@ -14,6 +14,8 @@ const requiredFiles = [
 const requiredRoutes = [
   "/transactions/receipt/preview",
   "/transactions/receipt/post",
+  "/transactions/agent-settlement/preview",
+  "/transactions/agent-settlement/post",
   "/transactions/fx-conversion/preview",
   "/currencies",
   "/settlements",
@@ -56,7 +58,7 @@ if (!mainSource.includes("ReactDOM.createRoot") || !mainSource.includes("AppErro
 if (!appSource.includes("app-shell") || !appSource.includes("sidebar") || !appSource.includes("Dashboard")) {
   throw new Error("Missing visible application shell");
 }
-for (const required of ["navGroups", "Masters", "Vouchers", "System", "CommandPalette", "Search voucher, report, party, account", "Day Book", "Alt+C", "Alt+R", "Alt+P", "Alt+E", "Alt+X"]) {
+for (const required of ["navGroups", "Masters", "Vouchers", "System", "CommandPalette", "Search voucher, report, party, account", "Day Book", "Agent Settlement", "Alt+C", "Alt+R", "Alt+P", "Alt+E", "Alt+X"]) {
   if (!appSource.includes(required)) {
     throw new Error(`Tally-style operator shell missing ${required}`);
   }
@@ -92,6 +94,11 @@ for (const forbidden of ["Charges/Commission", "Charges Value", "Charges shown",
 for (const required of ["Pay Money", "Money paid from cash/bank", "Client/vendor balance affected", "Currency Exchange", "Given Amount", "Received Amount", "Exchange Rate", "Exchange Difference"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Compressed operator workflow missing ${required}`);
+  }
+}
+for (const required of ["Agent Settlement", "Agent / Vendor", "Principal Amount", "Agent Commission", "Paid to agent", "Delivered by agent", "Earlier commission", "ensureAgentCommissionExpenseAccount"]) {
+  if (!transactionSource.includes(required)) {
+    throw new Error(`Agent Settlement voucher missing ${required}`);
   }
 }
 for (const required of ["cashShortageMessage", "Add opening balance or choose Bank", "Available {money(accountBalance"]) {

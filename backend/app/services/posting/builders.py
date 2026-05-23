@@ -12,6 +12,7 @@ from app.core.enums import (
     TransactionType,
 )
 from app.schemas.posting import (
+    AgentSettlementPayload,
     ExpensePayload,
     FxConversionPayload,
     OpeningBalancePayload,
@@ -219,6 +220,61 @@ def build_payment_preview(db: Session, payload: PaymentPayload) -> PostingPrevie
         LedgerEntryDraft(paying.id, Decimal("0"), payload.amount, payload.currency, "Payment"),
     ]
     return _preview(db, transaction_type=TransactionType.PAYMENT.value, gross_amount=payload.amount, gross_currency=payload.currency, components=components, ledger_entries=entries, warnings=[warning] if warning else [])
+
+
+def build_agent_settlement_preview(db: Session, payload: AgentSettlementPayload) -> PostingPreview:
+    ensure_positive(payload.principal_amount, "Principal amount")
+    ensure_user(db, payload.created_by_user_id)
+    ensure_settlement_open(db, payload.settlement_id)
+    ensure_currency(db, payload.currency)
+    paying = get_account(db, payload.paying_account_id)
+    clearing = get_account(db, payload.clearing_account_id)
+    commission_expense = get_account(db, payload.agent_commission_expense_account_id)
+    ensure_account_currency(paying, payload.currency)
+    ensure_account_currency(clearing, payload.currency)
+    ensure_account_currency(commission_expense, payload.currency)
+    ensure_account_type(paying, MOVEMENT_ACCOUNT_TYPES, "Paying")
+    ensure_account_type(commission_expense, {AccountType.EXPENSE.value, AccountType.BANK_CHARGE_EXPENSE.value}, "Agent commission")
+    total_payment = payload.principal_amount + payload.agent_commission_amount
+    warning = ensure_sufficient_balance(paying, total_payment, permission_granted=False)
+    components = [
+        ComponentDraft(
+            1,
+            ComponentType.PRINCIPAL.value,
+            payload.principal_amount,
+            payload.currency,
+            Direction.OUT.value,
+            account_id=clearing.id,
+            affects_settlement=payload.settlement_id is not None,
+            settlement_effect_type=SettlementEffectType.PRINCIPAL_OUT.value,
+            notes="Principal delivered through agent",
+        )
+    ]
+    entries = [
+        LedgerEntryDraft(clearing.id, payload.principal_amount, Decimal("0"), payload.currency, "Agent settlement principal"),
+        LedgerEntryDraft(paying.id, Decimal("0"), total_payment, payload.currency, "Agent settlement payment"),
+    ]
+    if payload.agent_commission_amount > 0:
+        components.append(
+            ComponentDraft(
+                2,
+                ComponentType.AGENT_COMMISSION_PAID.value,
+                payload.agent_commission_amount,
+                payload.currency,
+                Direction.OUT.value,
+                account_id=commission_expense.id,
+                party_id=payload.agent_party_id,
+                affects_profitability=True,
+                profitability_effect_type=ProfitabilityEffectType.EXPENSE.value,
+                linked_detail_type="expense",
+                notes="agent_commission",
+            )
+        )
+        entries.insert(
+            1,
+            LedgerEntryDraft(commission_expense.id, payload.agent_commission_amount, Decimal("0"), payload.currency, "Agent commission"),
+        )
+    return _preview(db, transaction_type=TransactionType.AGENT_SETTLEMENT.value, gross_amount=total_payment, gross_currency=payload.currency, components=components, ledger_entries=entries, warnings=[warning] if warning else [])
 
 
 def build_cash_handover_preview(db: Session, payload: TransferPayload) -> PostingPreview:

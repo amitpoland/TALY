@@ -115,6 +115,24 @@ class PaymentPayload(BasePostingPayload):
     currency: str
 
 
+class AgentSettlementPayload(BasePostingPayload):
+    paying_account_id: int
+    clearing_account_id: int
+    agent_commission_expense_account_id: int
+    agent_party_id: int | None = None
+    principal_amount: Decimal
+    agent_commission_amount: Decimal = Decimal("0")
+    currency: str
+
+    @model_validator(mode="after")
+    def validate_agent_settlement(self):
+        if self.principal_amount <= 0:
+            raise ValueError("Principal amount must be positive")
+        if self.agent_commission_amount < 0:
+            raise ValueError("Agent commission cannot be negative")
+        return self
+
+
 class TransferPayload(BasePostingPayload):
     from_account_id: int
     to_account_id: int

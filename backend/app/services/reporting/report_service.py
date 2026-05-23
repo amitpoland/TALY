@@ -224,7 +224,7 @@ def day_book_report(db: Session, filters: ReportFilters) -> ReportRead:
             money_in = sum((_amount(entry.debit) for entry, _ in cash_bank_entries), Decimal("0"))
             money_out = sum((_amount(entry.credit) for entry, _ in cash_bank_entries), Decimal("0"))
             commission = sum((component.amount for component, _ in components_for_currency if component.component_type == ComponentType.YOUR_COMMISSION.value), Decimal("0"))
-            expenses = sum((component.amount for component, _ in components_for_currency if component.component_type in {ComponentType.EXPENSE.value, ComponentType.FX_CHARGE.value}), Decimal("0"))
+            expenses = sum((component.amount for component, _ in components_for_currency if component.component_type in {ComponentType.EXPENSE.value, ComponentType.FX_CHARGE.value, ComponentType.AGENT_COMMISSION_PAID.value}), Decimal("0"))
             fx_difference = sum(
                 (
                     _profitability_signed_amount(component)
@@ -387,7 +387,7 @@ def commission_earned_report(db: Session, filters: ReportFilters) -> ReportRead:
 
 
 def commission_paid_report(db: Session, filters: ReportFilters) -> ReportRead:
-    return _component_report(db, filters, {"agent_commission", "commission_paid", "commission_payable"}, profitability_only=False)
+    return _component_report(db, filters, {ComponentType.AGENT_COMMISSION_PAID.value, "agent_commission", "commission_paid", "commission_payable"}, profitability_only=False)
 
 
 def expense_report(db: Session, filters: ReportFilters) -> ReportRead:

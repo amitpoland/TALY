@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.posting import (
+    AgentSettlementPayload,
     ExpensePayload,
     FxConversionPayload,
     OpeningBalancePayload,
@@ -18,6 +19,7 @@ from app.schemas.posting import (
 )
 from app.services.posting import posting_service
 from app.services.posting.builders import (
+    build_agent_settlement_preview,
     build_bank_transfer_preview,
     build_cash_handover_preview,
     build_expense_preview,
@@ -87,6 +89,18 @@ def preview_payment(payload: PaymentPayload, db: Session = Depends(get_db)):
 def post_payment(request: PostingRequest, db: Session = Depends(get_db)):
     payload = _payload_from_post(request, PaymentPayload)
     preview, transaction, audit_id = posting_service.post_payment(db, payload)
+    return _post_response(preview, transaction, audit_id)
+
+
+@router.post("/agent-settlement/preview", response_model=PostingPreviewRead)
+def preview_agent_settlement(payload: AgentSettlementPayload, db: Session = Depends(get_db)):
+    return _preview_response(build_agent_settlement_preview(db, payload))
+
+
+@router.post("/agent-settlement/post", response_model=PostingResultRead, status_code=status.HTTP_201_CREATED)
+def post_agent_settlement(request: PostingRequest, db: Session = Depends(get_db)):
+    payload = _payload_from_post(request, AgentSettlementPayload)
+    preview, transaction, audit_id = posting_service.post_agent_settlement(db, payload)
     return _post_response(preview, transaction, audit_id)
 
 

@@ -229,6 +229,78 @@ def test_payment_posting_updates_settlement_and_account_balances(
     assert balance.json()["balances"]["USD"] == -25
 
 
+def test_agent_settlement_posts_principal_and_agent_commission(
+    client: TestClient, db_session: Session
+) -> None:
+    user = create_user(db_session)
+    settlement = create_settlement(db_session)
+    cash = create_account(db_session, "AGENT-CASH-USD", "cash")
+    equity = create_account(db_session, "AGENT-EQUITY-USD", "owner_equity")
+    clearing = create_account(db_session, "AGENT-CLEARING-USD", "clearing")
+    commission = create_account(db_session, "AGENT-COMM-USD", "commission_income")
+    agent_commission = create_account(db_session, "AGENT-COMM-PAID-USD", "expense")
+    agent = create_account(db_session, "AGENT-TRACK-USD", "agent_wallet")
+    post(client, "/transactions/opening-balance/post", opening_payload(user, cash, equity, "101.00"))
+    post(
+        client,
+        "/transactions/receipt/post",
+        {
+            "transaction_date": "2026-05-15",
+            "created_by_user_id": user.id,
+            "settlement_id": settlement.id,
+            "receiving_account_id": cash.id,
+            "clearing_account_id": clearing.id,
+            "gross_amount": "101.00",
+            "principal_amount": "100.00",
+            "commission_amount": "1.00",
+            "commission_income_account_id": commission.id,
+            "currency": "USD",
+        },
+    )
+
+    payload = {
+        "transaction_date": "2026-05-15",
+        "created_by_user_id": user.id,
+        "settlement_id": settlement.id,
+        "paying_account_id": cash.id,
+        "clearing_account_id": clearing.id,
+        "agent_commission_expense_account_id": agent_commission.id,
+        "agent_party_id": agent.party_id,
+        "principal_amount": "100.00",
+        "agent_commission_amount": "0.50",
+        "currency": "USD",
+    }
+    preview = client.post("/transactions/agent-settlement/preview", json=payload)
+    assert preview.status_code == 200, preview.text
+    body = preview.json()
+    assert body["transaction_type"] == "agent_settlement"
+    assert Decimal(body["settlement_effect"]["USD"]) == Decimal("-100.00")
+    assert Decimal(body["profitability_effect"]["USD"]) == Decimal("-0.50")
+    assert Decimal(body["gross_amount"]) == Decimal("100.50")
+
+    result = post(client, "/transactions/agent-settlement/post", payload)
+
+    db_session.refresh(cash)
+    db_session.refresh(clearing)
+    db_session.refresh(agent_commission)
+    assert result["status"] == "posted"
+    assert cash.current_balance == Decimal("101.500000")
+    assert clearing.current_balance == Decimal("0.000000")
+    assert agent_commission.current_balance == Decimal("0.500000")
+    balance = client.get(f"/settlements/{settlement.id}/balance")
+    assert balance.status_code == 200
+    assert balance.json()["balances"]["USD"] == 0
+    paid_report = client.get("/reports/commission-paid")
+    profit_report = client.get("/reports/monthly-profitability")
+    day_book = client.get("/reports/day-book?date_from=2026-05-15&date_to=2026-05-15")
+    assert paid_report.status_code == 200
+    assert profit_report.status_code == 200
+    assert day_book.status_code == 200
+    assert Decimal(paid_report.json()["totals"]["USD"]) == Decimal("-0.500000")
+    assert Decimal(profit_report.json()["totals"]["USD"]) == Decimal("0.500000")
+    assert any(row["voucher_type"] == "agent_settlement" and Decimal(row["expense"]) == Decimal("0.500000") for row in day_book.json()["rows"])
+
+
 def test_cash_handover_and_bank_transfer(client: TestClient, db_session: Session) -> None:
     user = create_user(db_session)
     cash_a = create_account(db_session, "CASH-A-USD", "cash")

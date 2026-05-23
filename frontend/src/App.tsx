@@ -15,6 +15,7 @@ const voucherLinks = [
   ["Cash / Bank Entry", "/transactions/cashBankEntry", "Alt+C"],
   ["Receive Money", "/transactions/receipt", "Alt+R"],
   ["Pay Money", "/transactions/payment", "Alt+P"],
+  ["Agent Settlement", "/transactions/agentSettlement", ""],
   ["Cash Handover", "/transactions/cashHandover", ""],
   ["Bank Transfer", "/transactions/bankTransfer", ""],
   ["Expense", "/transactions/expense", "Alt+E"],

@@ -19,6 +19,7 @@ from app.models.transaction import Transaction
 from app.models.transaction_component import TransactionComponent
 from app.models.common import utcnow
 from app.schemas.posting import (
+    AgentSettlementPayload,
     ExpensePayload,
     FxConversionPayload,
     OpeningBalancePayload,
@@ -30,6 +31,7 @@ from app.schemas.posting import (
 from app.services.audit_service import write_audit_log
 from app.services.posting.account_balance_service import apply_ledger_entries_to_balances, preview_balance_effects
 from app.services.posting.builders import (
+    build_agent_settlement_preview,
     build_bank_transfer_preview,
     build_cash_handover_preview,
     build_expense_preview,
@@ -261,6 +263,13 @@ def post_receipt(db: Session, payload: ReceiptPayload) -> tuple[PostingPreview, 
 
 def post_payment(db: Session, payload: PaymentPayload) -> tuple[PostingPreview, Transaction, int | None]:
     preview = build_payment_preview(db, payload)
+    transaction, audit_id = _persist_preview(db, preview=preview, payload=payload, created_by_user_id=payload.created_by_user_id, description=payload.description, transaction_date=payload.transaction_date, settlement_id=payload.settlement_id)
+    db.commit()
+    return preview, transaction, audit_id
+
+
+def post_agent_settlement(db: Session, payload: AgentSettlementPayload) -> tuple[PostingPreview, Transaction, int | None]:
+    preview = build_agent_settlement_preview(db, payload)
     transaction, audit_id = _persist_preview(db, preview=preview, payload=payload, created_by_user_id=payload.created_by_user_id, description=payload.description, transaction_date=payload.transaction_date, settlement_id=payload.settlement_id)
     db.commit()
     return preview, transaction, audit_id

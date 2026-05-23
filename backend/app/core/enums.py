@@ -37,6 +37,7 @@ class TransactionType(StrEnum):
     CASH_HANDOVER = "cash_handover"
     BANK_TRANSFER = "bank_transfer"
     CURRENCY_EXCHANGE = "currency_exchange"
+    AGENT_SETTLEMENT = "agent_settlement"
     EXPENSE = "expense"
     REVERSAL = "reversal"
 
@@ -51,6 +52,7 @@ class ComponentType(StrEnum):
     GROSS_RECEIPT = "gross_receipt"
     PRINCIPAL = "principal"
     YOUR_COMMISSION = "your_commission"
+    AGENT_COMMISSION_PAID = "agent_commission_paid"
     CASH_MOVEMENT = "cash_movement"
     BANK_MOVEMENT = "bank_movement"
     FX_GAIN = "fx_gain"
