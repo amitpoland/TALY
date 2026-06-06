@@ -143,6 +143,11 @@ for (const required of ["Agent Settlement", "Agent / Vendor", "Principal Amount"
     throw new Error(`Agent Settlement voucher missing ${required}`);
   }
 }
+for (const required of ["agentSettlementInitialForm", "setForm(agentSettlementInitialForm())", "Delete Draft", "secondary-action"]) {
+  if (!transactionSource.includes(required)) {
+    throw new Error(`Agent Settlement edit/delete draft controls missing ${required}`);
+  }
+}
 for (const required of ["ensureOpenSettlement", "api.createSettlement"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Agent Settlement auto-settlement support missing ${required}`);

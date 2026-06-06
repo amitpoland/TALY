@@ -947,8 +947,12 @@ function PaymentVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
   );
 }
 
-function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
-  const [form, setForm] = useState({ date: todayDate(), client: "", agent: "", paymentSource: "agent_advance", payFrom: "", advanceCurrency: "USD", amountMode: "net", amount: "", commissionType: "fixed", agentCommission: "", exchangeRate: "", reference: "" });
+function agentSettlementInitialForm() {
+  return { date: todayDate(), client: "", agent: "", paymentSource: "agent_advance", payFrom: "", advanceCurrency: "USD", amountMode: "net", amount: "", commissionType: "fixed", agentCommission: "", exchangeRate: "", reference: "" };
+}
+
+function AgentSettlementVoucher({ lookups, submit, refreshLookups, resetPreview, busy }: VoucherProps) {
+  const [form, setForm] = useState(agentSettlementInitialForm);
   const exchangeRateInputRef = useRef<HTMLInputElement>(null);
   const [walletBusy, setWalletBusy] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
@@ -1004,6 +1008,13 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
   function updateForm(next: Partial<typeof form>) {
     setForm((current) => ({ ...current, ...next }));
     setSetupError(null);
+    resetPreview();
+  }
+
+  function deleteDraft() {
+    setForm(agentSettlementInitialForm());
+    setSetupError(null);
+    resetPreview();
   }
 
   async function quickCreateBalance() {
@@ -1123,6 +1134,8 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
       {!clientBalance && <MissingBalanceNotice party={selectedClient} currency={settlementCurrency} onCreate={quickCreateBalance} busy={walletBusy} />}
       <div className="voucher-action-row">
         <button type="submit" className="primary-action" disabled={busy || !canPreview}>Preview Voucher</button>
+        <button type="button" className="secondary-action" onClick={resetPreview}>Edit</button>
+        <button type="button" className="danger-action" onClick={deleteDraft}>Delete Draft</button>
         {!canPreview && <span className="action-hint">{previewBlockedReason}</span>}
       </div>
     </form>
