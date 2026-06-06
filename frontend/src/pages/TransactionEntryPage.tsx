@@ -159,7 +159,7 @@ function CrossCurrencyRateBox({
         <span>{moneyCurrency}</span>
       </label>
       <p>
-        Client balance will use {rate > 0 ? `${money(amount)} ${moneyCurrency} / ${exchangeRate} = ${money(clientAmount)} ${clientCurrency}` : `the ${clientCurrency} amount after you enter the rate`}.
+        Client amount {rate > 0 ? `${money(amount)} ${moneyCurrency} / ${exchangeRate} = ${money(clientAmount)} ${clientCurrency}` : `will show after you enter the rate`}.
       </p>
     </div>
   );
@@ -235,7 +235,7 @@ async function ensureOpenSettlement(
 }
 
 function cleanAccountName(name: string): string {
-  return name.replace(/\bwallet\b/gi, "Balance").replace(/\bledger\b/gi, "Account");
+  return name.replace(/\bagent advance\b/gi, "Agent Balance").replace(/\bwallet\b/gi, "Balance").replace(/\bledger\b/gi, "Account");
 }
 
 function accountLabel(account: Account): string {
@@ -572,11 +572,12 @@ function PreviewPanel({
       { label: "Client/vendor balance affected", value: amountWithCurrency(payload?.settlement_amount, String(payload?.settlement_currency ?? "")) }
     );
   } else if (previewRouteKey === "agentSettlement") {
+    const paymentCurrency = String(payload?.payment_currency ?? currency);
+    const settlementCurrency = String(payload?.settlement_currency ?? currency);
     summaryRows.push(
-      { label: "Principal delivered", value: amountWithCurrency(payload?.principal_amount) },
-      { label: "Agent commission", value: amountWithCurrency(payload?.agent_commission_amount) },
-      { label: "Paid to agent", value: amountWithCurrency(preview.gross_amount) },
-      { label: "Your profit", value: `Earlier commission - ${amountWithCurrency(payload?.agent_commission_amount)}` }
+      { label: "Client settled", value: amountWithCurrency(payload?.principal_amount, settlementCurrency) },
+      { label: "Agent fee", value: amountWithCurrency(payload?.agent_commission_amount, paymentCurrency) },
+      { label: String(payload?.payment_source) === "agent_advance" ? "From already paid balance" : "Pay agent now", value: amountWithCurrency(preview.gross_amount, paymentCurrency) }
     );
   } else if (previewRouteKey === "fxConversion") {
     const fxDifference = component("fx_gain") ?? component("fx_loss");
@@ -970,7 +971,7 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
   const principal = isCrossCurrency ? baseValueFromQuotedRate(paymentPrincipal, exchangeRate) : paymentPrincipal;
   const settlementIdValue = autoSettlementId(lookups.settlements);
   const cashWarning = usesAdvance
-    ? balanceShortageMessage(advanceAccount, paidToAgent, "Add agent advance first or use Pay Now.")
+    ? balanceShortageMessage(advanceAccount, paidToAgent, "Add opening balance for this agent or choose Pay Now.")
     : cashShortageMessage(payAccount, paidToAgent);
   const inactivePayFrom = inactiveAccountSelection(lookups.accounts, form.payFrom, "Pay From");
   const previewBlockedReason = !usesAdvance && inactivePayFrom
@@ -980,7 +981,7 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
     : !selectedAgent
       ? "Select Agent / Vendor."
       : usesAdvance && !advanceAccount
-        ? `Create ${paymentCurrency} Agent Advance for ${selectedAgent.name}.`
+        ? `No ${paymentCurrency} balance exists for ${selectedAgent.name}.`
       : !usesAdvance && !payAccount
         ? "Select Pay From."
         : isCrossCurrency && exchangeRate <= 0
@@ -1081,14 +1082,14 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
     <form className="entry-form voucher-form" onSubmit={onSubmit}>
       {partySelect(lookups.parties, form.client, (client) => updateForm({ client }), true, "Client")}
       {partySelect(lookups.parties, form.agent, (agent) => updateForm({ agent }), true, "Agent / Vendor")}
-      <label><span>Settlement Source</span><select value={form.paymentSource} onChange={(event) => updateForm({ paymentSource: event.target.value })}><option value="agent_advance">Use Agent Advance</option><option value="cash_bank">Pay Now Cash/Bank</option></select></label>
+      <label><span>Payment</span><select value={form.paymentSource} onChange={(event) => updateForm({ paymentSource: event.target.value })}><option value="agent_advance">Already paid agent</option><option value="cash_bank">Pay now from Cash/Bank</option></select></label>
       {usesAdvance
         ? currencySelect(lookups.currencies, form.advanceCurrency, (advanceCurrency) => updateForm({ advanceCurrency }), "Currency")
         : accountSelect(lookups.accounts, form.payFrom, (payFrom) => updateForm({ payFrom }), "Pay From", ["cash", "bank"])}
-      {usesAdvance && !advanceAccount && (
+      {usesAdvance && selectedAgent && !advanceAccount && (
         <div className="state-block warning">
-          <span>No {paymentCurrency} Agent Advance exists for {selectedAgent?.name}. Create it to use already-paid money.</span>
-          <button type="button" onClick={quickCreateAgentAdvance} disabled={walletBusy}>{walletBusy ? "Creating..." : "Create Agent Advance"}</button>
+          <span>No {paymentCurrency} balance exists for {selectedAgent?.name}. Create it to adjust money already paid.</span>
+          <button type="button" onClick={quickCreateAgentAdvance} disabled={walletBusy}>{walletBusy ? "Creating..." : "Create Agent Balance"}</button>
         </div>
       )}
       <label><span>Date</span><input type="date" required value={form.date} onChange={(event) => updateForm({ date: event.target.value })} /></label>
@@ -1109,17 +1110,14 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
       <label><span>Commission Value</span><input value={form.agentCommission} onChange={(event) => updateForm({ agentCommission: event.target.value })} /></label>
       <label><span>Reference</span><input value={form.reference} onChange={(event) => updateForm({ reference: event.target.value })} /></label>
       <div className="voucher-plain-summary">
-        <span>Delivered by agent {money(principal)} {settlementCurrency}</span>
-        <span>Agent commission {money(agentCommission)} {paymentCurrency}</span>
-        <span>{usesAdvance ? "Adjusted from agent advance" : "Paid to agent"} {money(paidToAgent)} {paymentCurrency}</span>
+        <span>Client settled {money(principal)} {settlementCurrency}</span>
+        <span>Agent fee {money(agentCommission)} {paymentCurrency}</span>
+        <span>{usesAdvance ? "From already paid balance" : "Pay agent now"} {money(paidToAgent)} {paymentCurrency}</span>
         {isCrossCurrency && <span>Rate 1 {settlementCurrency} = {form.exchangeRate || "0"} {paymentCurrency}</span>}
-        <span>Your profit = earlier commission - {money(agentCommission)} {paymentCurrency}</span>
         {paymentSourceAccount && <span>Available {money(accountBalance(paymentSourceAccount))} {paymentCurrency}</span>}
-        {!settlementIdValue && <span>New settlement will be created automatically</span>}
       </div>
       {setupError && <p className="form-note danger-note">{setupError}</p>}
       {inactivePayFrom && !usesAdvance && <p className="form-note danger-note">{inactivePayFrom}</p>}
-      {cashWarning && <p className="form-note danger-note">{cashWarning}</p>}
       {!clientBalance && <MissingBalanceNotice party={selectedClient} currency={settlementCurrency} onCreate={quickCreateBalance} busy={walletBusy} />}
       <div className="voucher-action-row">
         <button type="submit" className="primary-action" disabled={busy || !canPreview}>Preview Voucher</button>

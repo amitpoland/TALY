@@ -95,7 +95,7 @@ for (const required of ["receiptAmounts", "amount / (1 + rate)", "amount - princ
     throw new Error(`Receipt commission reverse calculation missing ${required}`);
   }
 }
-for (const required of ["CrossCurrencyRateBox", "Currency exchange required", "baseValueFromQuotedRate", "amount / quoteRate", "storedOriginalRateFromQuote", "1 / quoteRate", "Rate: 1", "Client balance will use"]) {
+for (const required of ["CrossCurrencyRateBox", "Currency exchange required", "baseValueFromQuotedRate", "amount / quoteRate", "storedOriginalRateFromQuote", "1 / quoteRate", "Rate: 1", "Client amount"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Receipt exchange-rate direction missing ${required}`);
   }
@@ -138,12 +138,12 @@ for (const required of ["allowMissingRateHistory", "allow_insufficient_lots", "U
     throw new Error(`FX missing-rate-history permission UI missing ${required}`);
   }
 }
-for (const required of ["Agent Settlement", "Agent / Vendor", "Principal Amount", "Agent Commission", "Paid to agent", "Delivered by agent", "Earlier commission", "ensureAgentCommissionExpenseAccount"]) {
+for (const required of ["Agent Settlement", "Agent / Vendor", "Principal Amount", "Agent Commission", "Client settled", "Agent fee", "ensureAgentCommissionExpenseAccount"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Agent Settlement voucher missing ${required}`);
   }
 }
-for (const required of ["ensureOpenSettlement", "api.createSettlement", "New settlement will be created automatically"]) {
+for (const required of ["ensureOpenSettlement", "api.createSettlement"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Agent Settlement auto-settlement support missing ${required}`);
   }
@@ -156,7 +156,7 @@ for (const required of ["payment_principal_amount", "payment_currency", "settlem
     throw new Error(`Cross-currency Agent Settlement UI missing ${required}`);
   }
 }
-for (const required of ["Use Agent Advance", "Pay Now Cash/Bank", "agent_advance_account_id", "createAgentAdvance", "Adjusted from agent advance"]) {
+for (const required of ["Already paid agent", "Pay now from Cash/Bank", "agent_advance_account_id", "createAgentAdvance", "From already paid balance", "Create Agent Balance"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Agent advance settlement UI missing ${required}`);
   }
