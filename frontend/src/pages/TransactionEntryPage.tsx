@@ -1708,13 +1708,27 @@ export default function TransactionEntryPage({ routeKey }: { routeKey: Transacti
 
   return (
     <section className="marg-voucher-shell" onKeyDown={onShortcut}>
-      <header className="page-header voucher-page-header">
-        <div><h1>{title}</h1></div>
+      <header className="page-header voucher-page-header tally-voucher-header">
+        <div>
+          <span className="screen-path">Gateway / Vouchers</span>
+          <h1>{title}</h1>
+        </div>
         <div className="voucher-meta-bar">
           <span>Date can be changed for back-dated entries</span>
           {routeShortcut[routeKey] && <span>Shortcut: <strong>{routeShortcut[routeKey]}</strong></span>}
         </div>
       </header>
+      <div className="voucher-keybar" aria-label="Voucher shortcuts">
+        <span><kbd>F2</kbd>Date</span>
+        <span><kbd>Alt C</kbd>Cash/Bank</span>
+        <span><kbd>Alt R</kbd>Receipt</span>
+        <span><kbd>Alt P</kbd>Payment</span>
+        <span><kbd>Alt E</kbd>Expense</span>
+        <span><kbd>Alt X</kbd>Exchange</span>
+        <span><kbd>Enter</kbd>Preview</span>
+        <span><kbd>Ctrl Enter</kbd>Post</span>
+        <span><kbd>Esc</kbd>Edit</span>
+      </div>
       <div className="tabs voucher-type-strip">
         {operatorTransactionRouteKeys.map((key) => <NavLink key={key} to={`/transactions/${key}`}>{routeTitles[key]}</NavLink>)}
       </div>

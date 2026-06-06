@@ -191,9 +191,14 @@ for (const required of ["beginSearch", "setText(\"\")", "onFocus={beginSearch}",
     throw new Error(`Searchable dropdown reopen behavior missing ${required}`);
   }
 }
-for (const required of ["marg-voucher-shell", "voucher-workbench", "voucher-meta-bar", "Escape"]) {
+for (const required of ["marg-voucher-shell", "voucher-workbench", "voucher-meta-bar", "voucher-keybar", "Gateway / Vouchers", "F2", "Ctrl Enter", "Escape"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Compact voucher workflow missing ${required}`);
+  }
+}
+for (const required of ["tally-voucher-header", "voucher-keybar", "grid-template-columns: minmax(520px, 820px) minmax(320px, 1fr)", "border-left-color: #e0b44b"]) {
+  if (!styleSource.includes(required)) {
+    throw new Error(`Tally-style voucher feel missing ${required}`);
   }
 }
 if (transactionSource.includes("Quick Check") || transactionSource.includes("Preview waits here")) {
