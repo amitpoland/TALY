@@ -95,7 +95,7 @@ for (const required of ["receiptAmounts", "amount / (1 + rate)", "amount - princ
     throw new Error(`Receipt commission reverse calculation missing ${required}`);
   }
 }
-for (const required of ["CrossCurrencyRateBox", "Currency exchange required", "baseValueFromQuotedRate", "amount / quoteRate", "storedOriginalRateFromQuote", "1 / quoteRate", "Rate: 1", "Client amount"]) {
+for (const required of ["CrossCurrencyRateBox", "Exchange rate", "baseValueFromQuotedRate", "amount / quoteRate", "storedOriginalRateFromQuote", "1 / quoteRate", "Rate: 1", "Client amount"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Receipt exchange-rate direction missing ${required}`);
   }
@@ -156,7 +156,7 @@ for (const required of ["payment_principal_amount", "payment_currency", "settlem
     throw new Error(`Cross-currency Agent Settlement UI missing ${required}`);
   }
 }
-for (const required of ["Already paid agent", "Pay now from Cash/Bank", "agent_advance_account_id", "createAgentAdvance", "From already paid balance", "Create Agent Balance"]) {
+for (const required of ["Adjust previous payment", "Pay now from Cash/Bank", "agent_advance_account_id", "createAgentAdvance", "Previous payment used", "Create Agent Balance"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Agent advance settlement UI missing ${required}`);
   }
