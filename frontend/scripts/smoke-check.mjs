@@ -191,6 +191,11 @@ for (const required of ["beginSearch", "setText(\"\")", "onFocus={beginSearch}",
     throw new Error(`Searchable dropdown reopen behavior missing ${required}`);
   }
 }
+for (const required of ["isActiveAccount", "isActiveAccount(account) && types.includes", "partyWallet(accounts", "inactiveAccountSelection", "Choose an active account or restore it from Accounts"]) {
+  if (!transactionSource.includes(required)) {
+    throw new Error(`Inactive account voucher guard missing ${required}`);
+  }
+}
 for (const required of ["marg-voucher-shell", "voucher-workbench", "voucher-meta-bar", "voucher-keybar", "Gateway / Vouchers", "F2", "Ctrl Enter", "Escape"]) {
   if (!transactionSource.includes(required)) {
     throw new Error(`Compact voucher workflow missing ${required}`);

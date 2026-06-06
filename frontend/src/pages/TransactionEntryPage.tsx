@@ -254,10 +254,14 @@ function walletTypeForParty(party?: Party): string {
   return "clearing";
 }
 
+function isActiveAccount(account?: Account): account is Account {
+  return Boolean(account && account.is_active !== false);
+}
+
 function partyWallet(accounts: Account[], party?: Party, currency?: string): Account | undefined {
   if (!party || !currency) return undefined;
   const type = walletTypeForParty(party);
-  return accounts.find((account) => account.party_id === party.id && account.currency === currency && account.account_type === type);
+  return accounts.find((account) => isActiveAccount(account) && account.party_id === party.id && account.currency === currency && account.account_type === type);
 }
 
 function agentAdvanceAccount(accounts: Account[], party?: Party, currency?: string): Account | undefined {
@@ -270,7 +274,7 @@ function walletCode(party: Party, currency: string): string {
 }
 
 function options(accounts: Account[], types: string[], currency?: string) {
-  return accounts.filter((account) => types.includes(account.account_type) && (!currency || account.currency === currency));
+  return accounts.filter((account) => isActiveAccount(account) && types.includes(account.account_type) && (!currency || account.currency === currency));
 }
 
 function commissionIncomeAccount(accounts: Account[], currency: string): Account | undefined {
@@ -390,7 +394,14 @@ async function ensureAgentCommissionExpenseAccount(lookups: Lookups, currency: s
 }
 
 function findAccount(accounts: Account[], id: string) {
-  return accounts.find((account) => account.id === Number(id));
+  return accounts.find((account) => account.id === Number(id) && isActiveAccount(account));
+}
+
+function inactiveAccountSelection(accounts: Account[], id: string, label: string): string | null {
+  if (!id) return null;
+  const account = accounts.find((item) => item.id === Number(id));
+  if (!account || account.is_active !== false) return null;
+  return `${label} ${accountLabel(account)} is inactive. Choose an active account or restore it from Accounts.`;
 }
 
 function findParty(parties: Party[], id: string) {
@@ -747,6 +758,7 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
   const { gross, principal, commission } = receiptAmounts(clientAmount, form.amountMode, form.commissionType, commissionValue);
   const approxBaseValue = baseValueFromQuotedRate(amount, exchangeRate);
   const clientBalance = partyWallet(lookups.accounts, selectedParty, clientCurrency);
+  const inactiveReceiveIn = inactiveAccountSelection(lookups.accounts, form.receiveIn, "Receive In");
   const canPreview = Boolean(clientBalance && receiveAccount && principal >= 0 && amount > 0 && (!isCrossCurrency || exchangeRate > 0));
 
   useEffect(() => {
@@ -858,6 +870,7 @@ function ReceiptVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
         <span>Client balance {clientBalance ? accountLabel(clientBalance) : "Missing"}</span>
       </div>
       {setupError && <p className="form-note danger-note">{setupError}</p>}
+      {inactiveReceiveIn && <p className="form-note danger-note">{inactiveReceiveIn}</p>}
       {!clientBalance && <MissingBalanceNotice party={selectedParty} currency={clientCurrency} onCreate={quickCreateBalance} busy={walletBusy} />}
       {isCrossCurrency && advancedBlock(
         <>
@@ -880,6 +893,7 @@ function PaymentVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
   const [walletBusy, setWalletBusy] = useState(false);
   const amount = decimal(form.amount);
   const cashWarning = cashShortageMessage(payAccount, amount);
+  const inactivePayFrom = inactiveAccountSelection(lookups.accounts, form.payFrom, "Pay From");
   const canPreview = Boolean(clientBalance && payAccount && amount > 0 && !cashWarning);
 
   async function quickCreateBalance() {
@@ -925,6 +939,7 @@ function PaymentVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
         <span>Client balance {clientBalance ? accountLabel(clientBalance) : "Missing"}</span>
       </div>
       {cashWarning && <p className="form-note danger-note">{cashWarning}</p>}
+      {inactivePayFrom && <p className="form-note danger-note">{inactivePayFrom}</p>}
       {!clientBalance && <MissingBalanceNotice party={selectedParty} currency={currency} onCreate={quickCreateBalance} busy={walletBusy} />}
       <button type="submit" disabled={busy || !canPreview}>Preview</button>
     </form>
@@ -957,7 +972,10 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
   const cashWarning = usesAdvance
     ? balanceShortageMessage(advanceAccount, paidToAgent, "Add agent advance first or use Pay Now.")
     : cashShortageMessage(payAccount, paidToAgent);
-  const previewBlockedReason = !selectedClient
+  const inactivePayFrom = inactiveAccountSelection(lookups.accounts, form.payFrom, "Pay From");
+  const previewBlockedReason = !usesAdvance && inactivePayFrom
+    ? inactivePayFrom
+    : !selectedClient
     ? "Select Client."
     : !selectedAgent
       ? "Select Agent / Vendor."
@@ -1100,6 +1118,7 @@ function AgentSettlementVoucher({ lookups, submit, refreshLookups, busy }: Vouch
         {!settlementIdValue && <span>New settlement will be created automatically</span>}
       </div>
       {setupError && <p className="form-note danger-note">{setupError}</p>}
+      {inactivePayFrom && !usesAdvance && <p className="form-note danger-note">{inactivePayFrom}</p>}
       {cashWarning && <p className="form-note danger-note">{cashWarning}</p>}
       {!clientBalance && <MissingBalanceNotice party={selectedClient} currency={settlementCurrency} onCreate={quickCreateBalance} busy={walletBusy} />}
       <div className="voucher-action-row">
@@ -1139,14 +1158,17 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
   const convertedClientAmount = isCrossCurrency ? baseValueFromQuotedRate(decimal(form.amount), exchangeRate) : decimal(form.amount);
   const clientBalance = partyWallet(lookups.accounts, selectedParty, clientCurrency);
   const clientBalances = selectedParty
-    ? lookups.accounts.filter((account) => account.party_id === selectedParty.id && ["customer_wallet", "agent_wallet", "fx_dealer_wallet", "clearing"].includes(account.account_type))
+    ? lookups.accounts.filter((account) => account.is_active !== false && account.party_id === selectedParty.id && ["customer_wallet", "agent_wallet", "fx_dealer_wallet", "clearing"].includes(account.account_type))
     : [];
   const amount = decimal(form.amount);
   const commissionValue = decimal(form.commissionValue);
   const receipt = isReceipt ? receiptAmounts(convertedClientAmount, form.amountMode, form.commissionType, commissionValue) : { gross: amount, principal: amount, commission: 0 };
   const { gross, principal, commission } = receipt;
   const cashWarning = !isReceipt ? cashShortageMessage(cashBankAccount, amount) : null;
-  const previewBlockedReason = !cashBankAccount
+  const inactiveCashBank = inactiveAccountSelection(lookups.accounts, form.cashBank, "Cash/Bank");
+  const previewBlockedReason = inactiveCashBank
+    ? inactiveCashBank
+    : !cashBankAccount
     ? "Select Cash/Bank."
     : !selectedParty
       ? "Select Party."
@@ -1317,6 +1339,7 @@ function CashBankEntryVoucher({ lookups, submit, refreshLookups, resetPreview, b
         </div>
       )}
       {setupError && <p className="form-note danger-note">{setupError}</p>}
+      {inactiveCashBank && <p className="form-note danger-note">{inactiveCashBank}</p>}
       {cashWarning && <p className="form-note danger-note">{cashWarning}</p>}
       {!clientBalance && <MissingBalanceNotice party={selectedParty} currency={clientCurrency} onCreate={quickCreateBalance} busy={walletBusy} />}
       <div className="voucher-action-row">
@@ -1336,10 +1359,12 @@ function TransferVoucher({ lookups, routeKey, submit, busy }: VoucherProps) {
   const fromAccount = findAccount(lookups.accounts, form.from);
   const amount = decimal(form.amount);
   const cashWarning = cashShortageMessage(fromAccount, amount);
+  const inactiveFrom = inactiveAccountSelection(lookups.accounts, form.from, isBank ? "Transfer From" : "Hand Over From");
+  const inactiveTo = inactiveAccountSelection(lookups.accounts, form.to, isBank ? "Transfer To" : "Hand Over To");
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
-    if (cashWarning) return;
+    if (cashWarning || inactiveFrom || inactiveTo) return;
     submit({
       transaction_date: form.date,
       created_by_user_id: defaultUserId(lookups.users),
@@ -1363,8 +1388,10 @@ function TransferVoucher({ lookups, routeKey, submit, busy }: VoucherProps) {
       <label><span>Amount</span><input required value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
       <label><span>Reference</span><input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></label>
       {fromAccount && <div className="voucher-plain-summary"><span>Available {money(accountBalance(fromAccount))} {form.currency}</span></div>}
+      {inactiveFrom && <p className="form-note danger-note">{inactiveFrom}</p>}
+      {inactiveTo && <p className="form-note danger-note">{inactiveTo}</p>}
       {cashWarning && <p className="form-note danger-note">{cashWarning}</p>}
-      <button type="submit" disabled={busy || Boolean(cashWarning)}>Preview</button>
+      <button type="submit" disabled={busy || Boolean(cashWarning || inactiveFrom || inactiveTo)}>Preview</button>
     </form>
   );
 }
@@ -1376,6 +1403,8 @@ function ExpenseVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
   const amount = decimal(form.amount);
   const cashWarning = cashShortageMessage(paidFromAccount, amount);
   const selectedExpense = findAccount(lookups.accounts, form.expense) ?? expenseAccount(lookups.accounts, form.currency);
+  const inactivePaidFrom = inactiveAccountSelection(lookups.accounts, form.paidFrom, "Paid From");
+  const inactiveExpense = inactiveAccountSelection(lookups.accounts, form.expense, "Expense Type");
 
   async function quickCreateExpense() {
     setSetupError(null);
@@ -1389,7 +1418,7 @@ function ExpenseVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
-    if (cashWarning || amount <= 0 || !paidFromAccount) return;
+    if (cashWarning || inactivePaidFrom || inactiveExpense || amount <= 0 || !paidFromAccount) return;
     setSetupError(null);
     let expenseAccountId = asId(form.expense) ?? selectedExpense?.id;
     if (!expenseAccountId) {
@@ -1435,8 +1464,10 @@ function ExpenseVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps)
       <label><span>Reference</span><input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></label>
       {paidFromAccount && <div className="voucher-plain-summary"><span>Available {money(accountBalance(paidFromAccount))} {form.currency}</span></div>}
       {setupError && <p className="form-note danger-note">{setupError}</p>}
+      {inactivePaidFrom && <p className="form-note danger-note">{inactivePaidFrom}</p>}
+      {inactiveExpense && <p className="form-note danger-note">{inactiveExpense}</p>}
       {cashWarning && <p className="form-note danger-note">{cashWarning}</p>}
-      <button type="submit" disabled={busy || Boolean(cashWarning) || amount <= 0 || !paidFromAccount}>Preview</button>
+      <button type="submit" disabled={busy || Boolean(cashWarning || inactivePaidFrom || inactiveExpense) || amount <= 0 || !paidFromAccount}>Preview</button>
     </form>
   );
 }
@@ -1450,6 +1481,7 @@ function FxVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
   const toWallet = partyWallet(lookups.accounts, selectedParty, form.toCurrency);
   const actualRate = decimal(form.fromAmount) ? decimal(form.toAmount) / decimal(form.fromAmount) : 0;
   const sourceShortfall = fromWallet ? decimal(form.fromAmount) - accountBalance(fromWallet) : 0;
+  const inactiveChargeAccount = inactiveAccountSelection(lookups.accounts, form.chargeAccount, "Fee Type");
   const canPreview = Boolean(selectedParty && fromWallet && toWallet && decimal(form.fromAmount) > 0 && decimal(form.toAmount) > 0);
 
   async function quickCreateBalance(currency: string, target: "from" | "to") {
@@ -1542,7 +1574,8 @@ function FxVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
         </>
       )}
       {setupError && <p className="form-note danger-note">{setupError}</p>}
-      <button type="submit" disabled={busy || !canPreview}>Preview</button>
+      {inactiveChargeAccount && <p className="form-note danger-note">{inactiveChargeAccount}</p>}
+      <button type="submit" disabled={busy || !canPreview || Boolean(inactiveChargeAccount)}>Preview</button>
     </form>
   );
 }
@@ -1550,8 +1583,11 @@ function FxVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
 function OpeningBalanceVoucher({ lookups, submit, refreshLookups, busy }: VoucherProps) {
   const [form, setForm] = useState({ date: todayDate(), account: "", equity: "", currency: "USD", amount: "", exchangeRate: "", sourceNote: "" });
   const [setupError, setSetupError] = useState<string | null>(null);
+  const balanceAccount = findAccount(lookups.accounts, form.account);
   const sourceAccount = findAccount(lookups.accounts, form.equity) ?? openingSourceAccount(lookups.accounts, form.currency);
-  const canPreview = Boolean(form.account && decimal(form.amount) > 0);
+  const inactiveBalanceAccount = inactiveAccountSelection(lookups.accounts, form.account, "Balance For");
+  const inactiveSourceAccount = inactiveAccountSelection(lookups.accounts, form.equity, "Funding Source");
+  const canPreview = Boolean(balanceAccount && decimal(form.amount) > 0 && !inactiveSourceAccount);
 
   async function createOpeningSource() {
     setSetupError(null);
@@ -1614,6 +1650,8 @@ function OpeningBalanceVoucher({ lookups, submit, refreshLookups, busy }: Vouche
         </>
       )}
       {setupError && <p className="form-note danger-note">{setupError}</p>}
+      {inactiveBalanceAccount && <p className="form-note danger-note">{inactiveBalanceAccount}</p>}
+      {inactiveSourceAccount && <p className="form-note danger-note">{inactiveSourceAccount}</p>}
       <button type="submit" disabled={busy || !canPreview}>Preview</button>
     </form>
   );
